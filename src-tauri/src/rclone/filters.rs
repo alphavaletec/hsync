@@ -81,7 +81,7 @@ impl Filters {
     }
 }
 
-fn escape_glob(s: &str) -> String {
+pub fn escape_glob(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if matches!(c, '*' | '?' | '[' | ']' | '{' | '}' | '\\') {

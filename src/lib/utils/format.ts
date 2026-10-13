@@ -1,4 +1,4 @@
-import type { RunStatus, SyncMode } from "../api/types";
+import type { ItemState, RunStatus, SyncMode } from "../api/types";
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
 
@@ -119,3 +119,11 @@ export const PROVIDER_LABEL: Record<string, string> = {
 export function providerLabel(kind: string): string {
   return PROVIDER_LABEL[kind] ?? kind;
 }
+
+
+export const ITEM_STATE: Record<ItemState, { icon: string; label: string; help: string; cls: string }> = {
+  sync: { icon: "⇄", label: "sincronizar", help: "cópia local; mudanças dos dois lados", cls: "text-accent" },
+  download: { icon: "↓", label: "manter offline", help: "a pasta local espelha a nuvem", cls: "text-ok" },
+  upload: { icon: "↑", label: "só enviar", help: "o que estiver na pasta local sobe", cls: "text-warn" },
+  ignore: { icon: "⊘", label: "ignorar", help: "fica fora das sincronizações", cls: "text-dim" },
+};

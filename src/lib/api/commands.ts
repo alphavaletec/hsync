@@ -4,6 +4,9 @@ import type {
   ConfigStep,
   DaemonStatus,
   DirEntry,
+  FileEntry,
+  FilesConfig,
+  ItemState,
   Job,
   JobInput,
   JobProgress,
@@ -44,6 +47,20 @@ export const api = {
   deleteRemote: (name: string) => invoke<void>("delete_remote", { name }),
   listRemoteDirs: (remote: string, path: string) => invoke<DirEntry[]>("list_remote_dirs", { remote, path }),
   makeRemoteDir: (remote: string, path: string) => invoke<void>("make_remote_dir", { remote, path }),
+
+  // arquivos
+  filesConfig: (remote: string) => invoke<FilesConfig>("files_config", { remote }),
+  browse: (remote: string, path: string) => invoke<FileEntry[]>("browse", { remote, path }),
+  setItemState: (remote: string, path: string, isDir: boolean, itemState: ItemState | null) =>
+    invoke<FilesConfig>("set_item_state", { remote, path, isDir, itemState }),
+  setFilesBase: (remote: string, base: string) => invoke<FilesConfig>("set_files_base", { remote, base }),
+  setFilesInterval: (remote: string, minutes: number) =>
+    invoke<FilesConfig>("set_files_interval", { remote, minutes }),
+  syncAccountNow: (remote: string) => invoke<void>("sync_account_now", { remote }),
+  downloadItems: (remote: string, items: { path: string; isDir: boolean }[], target: string) =>
+    invoke<number>("download_items", { remote, items, target }),
+  uploadItems: (remote: string, dir: string, localPaths: string[]) =>
+    invoke<number>("upload_items", { remote, dir, localPaths }),
 
   // tarefas
   listJobs: () => invoke<Job[]>("list_jobs"),

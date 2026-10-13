@@ -6,6 +6,7 @@
 
   const TABS: { id: View; label: string }[] = [
     { id: "dashboard", label: "painel" },
+    { id: "files", label: "arquivos" },
     { id: "jobs", label: "tarefas" },
     { id: "accounts", label: "contas" },
     { id: "settings", label: "config" },

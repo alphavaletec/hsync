@@ -4,13 +4,15 @@ import { on } from "../api/events";
 import type { DaemonStatus, Job, JobProgress, LogLine, Remote, RunRecord, Settings } from "../api/types";
 import { toasts } from "./toasts.svelte";
 
-export type View = "dashboard" | "jobs" | "accounts" | "settings";
+export type View = "dashboard" | "files" | "jobs" | "accounts" | "settings";
 
 const LOG_LIMIT = 500;
 const SPEED_SAMPLES = 90;
 
 class AppStore {
   view = $state<View>("dashboard");
+  /** Conta aberta na aba Arquivos. */
+  filesRemote = $state<string | null>(null);
   daemon = $state<DaemonStatus>({ state: "starting" });
   jobs = $state<Job[]>([]);
   remotes = $state<Remote[]>([]);

@@ -3,6 +3,7 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 use crate::jobs::manager::JobProgress;
 use crate::jobs::model::{Job, JobInput, RunRecord};
+use crate::jobs::selection::parse_managed_key;
 use crate::jobs::RunOptions;
 use crate::state::AppState;
 
@@ -31,7 +32,11 @@ pub async fn create_job(state: State<'_, AppState>, input: JobInput) -> AppResul
 #[tauri::command]
 pub async fn update_job(state: State<'_, AppState>, id: i64, input: JobInput) -> AppResult<Job> {
     let input = input.normalize();
-    if find_job(&state, id)?.running {
+    let job = find_job(&state, id)?;
+    if job.managed.is_some() {
+        return Err(AppError::invalid("Esta tarefa é gerenciada pela aba Arquivos: altere-a por lá"));
+    }
+    if job.running {
         return Err(AppError::invalid("Aguarde a execução terminar para editar a tarefa"));
     }
     state.jobs.validate_input(&input, Some(id)).await?;
@@ -41,8 +46,13 @@ pub async fn update_job(state: State<'_, AppState>, id: i64, input: JobInput) ->
 
 #[tauri::command]
 pub async fn delete_job(state: State<'_, AppState>, id: i64) -> AppResult<()> {
-    if find_job(&state, id)?.running {
+    let job = find_job(&state, id)?;
+    if job.running {
         return Err(AppError::invalid("Pare a execução antes de excluir a tarefa"));
+    }
+    // Tarefa da aba Arquivos: desmarca os itens daquele estado (senão ela seria recriada).
+    if let Some((remote, item_state)) = job.managed.as_deref().and_then(parse_managed_key) {
+        state.store.clear_selections(&remote, Some(item_state))?;
     }
     state.store.delete_job(id)?;
     state.jobs.remove_job_files(id);

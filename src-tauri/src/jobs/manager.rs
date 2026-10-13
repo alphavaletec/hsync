@@ -2,7 +2,7 @@
 //! e agendamento por intervalo.
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use super::model::{now_ms, Endpoint, Job, JobInput, RunStatus, RunTotals, SyncMode};
+use super::selection::{compile_rules, job_input, managed_key, ItemState, JOB_STATES};
 use super::store::Store;
 use crate::error::{AppError, AppResult};
 use crate::rclone::client::clean_error;
@@ -90,6 +91,8 @@ pub struct JobManager {
     bisync_root: PathBuf,
     active: Mutex<HashMap<i64, ActiveRun>>,
     paused: AtomicBool,
+    /// Ids negativos para transferências avulsas (não persistidas como tarefa).
+    next_adhoc: AtomicI64,
 }
 
 impl JobManager {
@@ -102,6 +105,7 @@ impl JobManager {
             bisync_root,
             active: Mutex::new(HashMap::new()),
             paused: AtomicBool::new(paused),
+            next_adhoc: AtomicI64::new(-1),
         })
     }
 
@@ -270,6 +274,95 @@ impl JobManager {
         let _ = std::fs::remove_dir_all(self.bisync_root.join(job_id.to_string()));
     }
 
+    pub fn is_running(&self, job_id: i64) -> bool {
+        self.active.lock().unwrap().contains_key(&job_id)
+    }
+
+    /// Transferência avulsa (baixar/enviar agora): aparece no painel, mas não vira tarefa.
+    pub async fn start_adhoc(&self, label: String, path: &'static str, mut params: Value) -> AppResult<i64> {
+        let client = self.daemon.client()?;
+        let id = self.next_adhoc.fetch_sub(1, Ordering::SeqCst);
+        let group = group_name(id);
+        params["_group"] = json!(group);
+        self.active.lock().unwrap().insert(
+            id,
+            ActiveRun {
+                job_id: id,
+                job_name: label,
+                run_id: 0,
+                rc_job_id: None,
+                generation: self.daemon.generation(),
+                mode: SyncMode::Copy,
+                dry_run: false,
+                resync: false,
+                cancel_requested: false,
+                started_at: now_ms(),
+                last: CoreStats::default(),
+            },
+        );
+        match client.call_async(path, params).await {
+            Ok(rc_job_id) => {
+                if let Some(r) = self.active.lock().unwrap().get_mut(&id) {
+                    r.rc_job_id = Some(rc_job_id);
+                }
+                Ok(id)
+            }
+            Err(e) => {
+                self.active.lock().unwrap().remove(&id);
+                Err(e)
+            }
+        }
+    }
+
+    /// Recompila as tarefas gerenciadas da aba Arquivos para `remote` a partir das seleções.
+    /// Devolve os ids das tarefas criadas ou alteradas.
+    pub fn apply_selection(&self, remote: &str, base: &str, interval_minutes: u32) -> AppResult<Vec<i64>> {
+        let selections = self.store.list_selections(remote)?;
+        let mut changed = Vec::new();
+        for state in JOB_STATES {
+            let key = managed_key(remote, state);
+            let existing = self.store.find_managed_job(&key)?;
+            match (compile_rules(&selections, state), existing) {
+                (None, Some(id)) => {
+                    self.store.delete_job(id)?;
+                    self.remove_job_files(id);
+                }
+                (None, None) => {}
+                (Some(rules), Some(id)) => {
+                    let input = job_input(remote, base, state, rules, interval_minutes);
+                    let old = self.store.get_job(id)?;
+                    let rules_changed = old.filters.custom_rules != input.filters.custom_rules;
+                    self.store.update_job(id, &input)?;
+                    if rules_changed || old.source != input.source || old.dest != input.dest {
+                        // Mudou o conjunto sincronizado: refaz o estado do bisync (resync nunca apaga).
+                        if state == ItemState::Sync {
+                            self.store.set_bisync_initialized(id, false)?;
+                        }
+                        changed.push(id);
+                    }
+                }
+                (Some(rules), None) => {
+                    let input = job_input(remote, base, state, rules, interval_minutes);
+                    input.validate()?;
+                    changed.push(self.store.insert_managed_job(&input, &key)?);
+                }
+            }
+        }
+        self.emit_jobs_changed();
+        Ok(changed)
+    }
+
+    /// Ids das tarefas gerenciadas de uma conta.
+    pub fn managed_job_ids(&self, remote: &str) -> AppResult<Vec<i64>> {
+        let mut ids = Vec::new();
+        for state in JOB_STATES {
+            if let Some(id) = self.store.find_managed_job(&managed_key(remote, state))? {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
+    }
+
     // ------------------------------------------------------------------
 
     fn build_call(&self, job: &Job, dry_run: bool, resync: bool) -> AppResult<(&'static str, Value)> {
@@ -291,6 +384,8 @@ impl JobManager {
                     "path2": job.dest,
                     "workdir": workdir.to_string_lossy(),
                     "resync": resync,
+                    // Na ressincronização o arquivo mais recente vence, de qualquer lado.
+                    "resyncMode": "newer",
                     "recover": true,
                     "resilient": true,
                     "createEmptySrcDirs": true,
@@ -326,8 +421,11 @@ impl JobManager {
                 }
             }
         }
-        if let Err(e) = self.store.finish_run(run.run_id, status, &totals, error.as_deref()) {
-            log::error!("falha ao gravar execução {}: {e}", run.run_id);
+        // Transferências avulsas (id negativo) não têm registro no histórico.
+        if run.job_id > 0 {
+            if let Err(e) = self.store.finish_run(run.run_id, status, &totals, error.as_deref()) {
+                log::error!("falha ao gravar execução {}: {e}", run.run_id);
+            }
         }
         if run.mode == SyncMode::Bisync && run.resync && !run.dry_run && status == RunStatus::Success {
             let _ = self.store.set_bisync_initialized(run.job_id, true);
@@ -538,6 +636,7 @@ mod tests {
             bisync_initialized: false,
             created_at: 0,
             updated_at: 1_000,
+            managed: None,
             last_run: last_started.map(|s| RunRecord {
                 id: 1,
                 job_id: 1,

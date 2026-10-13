@@ -56,6 +56,7 @@ export interface Job {
   bisyncInitialized: boolean;
   createdAt: number;
   updatedAt: number;
+  managed: string | null;
   lastRun: RunRecord | null;
   running: boolean;
   nextRunAt: number | null;
@@ -180,4 +181,35 @@ export interface Settings {
   bwlimit: string;
   schedulesPaused: boolean;
   encrypted: boolean;
+}
+
+// ---- aba Arquivos ----
+
+export type ItemState = "sync" | "download" | "upload" | "ignore";
+
+export interface Selection {
+  path: string;
+  isDir: boolean;
+  state: ItemState;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modTime: string | null;
+  inCloud: boolean;
+  local: boolean;
+  localSize: number | null;
+  localModMs: number | null;
+}
+
+export interface FilesConfig {
+  remote: string;
+  base: string;
+  baseIsDefault: boolean;
+  intervalMinutes: number;
+  selections: Selection[];
+  jobs: Job[];
 }

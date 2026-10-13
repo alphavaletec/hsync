@@ -57,7 +57,7 @@
 </script>
 
 <ViewHeader
-  num="02"
+  num="03"
   crumb="tarefas"
   title={app.jobs.length ? `${app.jobs.length} ${app.jobs.length === 1 ? "tarefa" : "tarefas"}` : "nenhuma tarefa ainda"}
   subtitle={app.jobs.length ? `${scheduled} com agendamento` : "escolha origem, destino e modo"}
@@ -74,7 +74,8 @@
 <section class="flex flex-col gap-3 border-t border-line-soft px-5 py-4">
   {#if app.jobs.length === 0}
     <div class="term px-5 py-6 text-[12.5px] leading-[1.9]">
-      <p><span class="text-ok">◆</span> 1. conecte uma conta em <span class="text-accent">2:contas</span></p>
+      <p><span class="text-ok">◆</span> 1. conecte uma conta em <span class="text-accent">3:contas</span></p>
+      <p class="text-dim">◇ ou marque pastas direto na aba <span class="text-accent">1:arquivos</span></p>
       <p><span class="text-ok">◆</span> 2. crie uma tarefa: <span class="text-muted">origem → destino + modo</span></p>
       <p><span class="text-ok">◆</span> 3. simule (dry-run) e execute</p>
       <p class="text-dim">◇ opcional: agende para rodar sozinho na bandeja</p>
@@ -89,6 +90,9 @@
         <h3 class="truncate text-[14px] font-semibold">{job.name}</h3>
         <span class="badge text-accent">{MODE_LABEL[job.mode]}</span>
         <span class="text-[11px] text-dim">{directionOf(job.source, job.dest)}</span>
+        {#if job.managed}
+          <span class="badge text-muted" title="Criada a partir dos itens marcados na aba Arquivos">aba arquivos</span>
+        {/if}
         {#if job.mode === "bisync" && !job.bisyncInitialized}
           <span class="badge text-warn" title="A próxima execução fará a ressincronização inicial">resync pendente</span>
         {/if}
@@ -106,7 +110,11 @@
                 <RefreshCw size={14} />
               </button>
             {/if}
-            <button class="btn btn-icon" onclick={() => (editing = job)} title="Editar"><Pencil size={14} /></button>
+            {#if job.managed}
+              <button class="btn btn-icon" onclick={() => ((app.filesRemote = job.managed!.split(":")[1]), (app.view = "files"))} title="Editar na aba Arquivos"><Pencil size={14} /></button>
+            {:else}
+              <button class="btn btn-icon" onclick={() => (editing = job)} title="Editar"><Pencil size={14} /></button>
+            {/if}
             <button class="btn btn-icon btn-danger" onclick={() => remove(job)} title="Excluir"><Trash2 size={14} /></button>
           {/if}
         </div>

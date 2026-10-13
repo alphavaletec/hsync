@@ -26,7 +26,7 @@
     <div class="max-h-[340px] overflow-auto px-4 py-3 text-[12.5px] leading-[1.9]">
       {#if app.runs.length === 0}
         <p class="text-muted">◇ nenhuma execução ainda.</p>
-        <p class="text-dim">&nbsp;&nbsp;crie uma tarefa em <span class="text-accent">1:tarefas</span> e execute.</p>
+        <p class="text-dim">&nbsp;&nbsp;marque pastas em <span class="text-accent">1:arquivos</span> ou crie uma tarefa em <span class="text-accent">2:tarefas</span>.</p>
       {:else}
         {#each app.runs.slice(0, 30) as r (r.id)}
           <div class="flex items-baseline gap-3 whitespace-nowrap">

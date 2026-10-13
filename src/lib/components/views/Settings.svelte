@@ -74,7 +74,7 @@
   }
 </script>
 
-<ViewHeader num="04" crumb="config" title="configurações" subtitle="segurança, banda e inicialização" />
+<ViewHeader num="05" crumb="config" title="configurações" subtitle="segurança, banda e inicialização" />
 
 <section class="grid grid-cols-2 gap-x-10 gap-y-8 border-t border-line-soft px-5 py-5">
   <div class="flex flex-col gap-3">

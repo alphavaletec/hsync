@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use super::model::{now_ms, Job, JobInput, RunRecord, RunStatus, RunTotals, Schedule, SyncMode};
+use super::selection::{ItemState, Selection};
 use crate::error::{AppError, AppResult};
 
 const MIGRATIONS: &[&str] = &[r#"
@@ -39,6 +40,16 @@ CREATE INDEX idx_job_runs_job ON job_runs(job_id, started_at DESC);
 CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+"#, r#"
+ALTER TABLE jobs ADD COLUMN managed TEXT;
+CREATE UNIQUE INDEX idx_jobs_managed ON jobs(managed) WHERE managed IS NOT NULL;
+CREATE TABLE selections (
+    remote TEXT    NOT NULL,
+    path   TEXT    NOT NULL,
+    is_dir INTEGER NOT NULL,
+    state  TEXT    NOT NULL,
+    PRIMARY KEY (remote, path)
 );
 "#];
 
@@ -112,6 +123,61 @@ impl Store {
             ],
         )?;
         Ok(conn.last_insert_rowid())
+    }
+
+    pub fn find_managed_job(&self, key: &str) -> AppResult<Option<i64>> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT id FROM jobs WHERE managed = ?1", [key], |r| r.get(0))
+            .optional()?)
+    }
+
+    pub fn insert_managed_job(&self, input: &JobInput, key: &str) -> AppResult<i64> {
+        let id = self.insert_job(input)?;
+        self.conn.lock().unwrap().execute("UPDATE jobs SET managed = ?1 WHERE id = ?2", params![key, id])?;
+        Ok(id)
+    }
+
+    // ---- seleção por item (aba Arquivos) ----
+
+    pub fn list_selections(&self, remote: &str) -> AppResult<Vec<Selection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT path, is_dir, state FROM selections WHERE remote = ?1 ORDER BY path")?;
+        let rows = stmt
+            .query_map([remote], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, String>(2)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(path, is_dir, state)| Some(Selection { path, is_dir, state: ItemState::parse(&state)? }))
+            .collect())
+    }
+
+    pub fn set_selection(&self, remote: &str, path: &str, is_dir: bool, state: Option<ItemState>) -> AppResult<()> {
+        let conn = self.conn.lock().unwrap();
+        match state {
+            Some(s) => conn.execute(
+                "INSERT INTO selections (remote, path, is_dir, state) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(remote, path) DO UPDATE SET is_dir = excluded.is_dir, state = excluded.state",
+                params![remote, path, is_dir, s.as_str()],
+            )?,
+            None => conn.execute("DELETE FROM selections WHERE remote = ?1 AND path = ?2", params![remote, path])?,
+        };
+        Ok(())
+    }
+
+    /// Remove as seleções de um estado (usado quando a tarefa gerenciada é excluída).
+    pub fn clear_selections(&self, remote: &str, state: Option<ItemState>) -> AppResult<()> {
+        let conn = self.conn.lock().unwrap();
+        match state {
+            Some(s) => conn.execute(
+                "DELETE FROM selections WHERE remote = ?1 AND state = ?2",
+                params![remote, s.as_str()],
+            )?,
+            None => conn.execute("DELETE FROM selections WHERE remote = ?1", [remote])?,
+        };
+        Ok(())
     }
 
     pub fn update_job(&self, id: i64, input: &JobInput) -> AppResult<()> {
@@ -265,6 +331,7 @@ fn job_from_row(r: &Row) -> rusqlite::Result<Job> {
         bisync_initialized: r.get("bisync_initialized")?,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
+        managed: r.get("managed")?,
         last_run: None,
         running: false,
         next_run_at: None,

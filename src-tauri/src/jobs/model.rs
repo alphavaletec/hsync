@@ -107,6 +107,8 @@ pub struct Job {
     pub bisync_initialized: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    /// `files:<conta>:<estado>` quando a tarefa é gerada pela aba Arquivos.
+    pub managed: Option<String>,
     pub last_run: Option<RunRecord>,
     // Preenchidos pelo JobManager:
     pub running: bool,

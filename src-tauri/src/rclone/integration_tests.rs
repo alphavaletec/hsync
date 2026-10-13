@@ -159,6 +159,51 @@ async fn sync_copy_bisync_against_real_rclone() {
     assert!(wait_job(&client, client.call_async("sync/bisync", bis(false)).await.unwrap()).await.success);
     assert!(bsrc.join("dois.txt").exists(), "bisync deve trazer arquivos do path2");
 
+    // --- seleção por item (aba Arquivos): raiz inteira + regras compiladas ---
+    use crate::jobs::selection::{compile_rules, ItemState, Selection};
+    let cloud = root.join("c");
+    let local = root.join("l");
+    let work2 = root.join("w2");
+    write(&cloud.join("Fotos/a.jpg"), "a");
+    write(&cloud.join("Fotos/RAW/big.raw"), "r");
+    write(&cloud.join("Docs/x.pdf"), "x");
+    write(&cloud.join("Outros/nao.txt"), "n");
+    let sels = vec![
+        Selection { path: "Fotos".into(), is_dir: true, state: ItemState::Sync },
+        Selection { path: "Fotos/RAW".into(), is_dir: true, state: ItemState::Ignore },
+        Selection { path: "Docs/x.pdf".into(), is_dir: false, state: ItemState::Download },
+    ];
+    let sync_rules = compile_rules(&sels, ItemState::Sync).unwrap();
+    let bis_sel = |resync: bool| {
+        json!({ "path1": s(&local), "path2": s(&cloud), "workdir": s(&work2), "resync": resync,
+                "resyncMode": "newer", "recover": true, "resilient": true, "_group": "t5",
+                "_filter": { "FilterRule": sync_rules } })
+    };
+    std::fs::create_dir_all(&local).unwrap();
+    let st = wait_job(&client, client.call_async("sync/bisync", bis_sel(true)).await.unwrap()).await;
+    assert!(st.success, "resync seletivo: {}", st.error);
+    assert!(local.join("Fotos/a.jpg").exists());
+    assert!(!local.join("Fotos/RAW").exists(), "pasta ignorada não desce");
+    assert!(!local.join("Outros").exists(), "fora da seleção não desce");
+    write(&local.join("Fotos/nova.jpg"), "n");
+    let st = wait_job(&client, client.call_async("sync/bisync", bis_sel(false)).await.unwrap()).await;
+    assert!(st.success, "bisync seletivo: {}", st.error);
+    assert!(cloud.join("Fotos/nova.jpg").exists(), "mudança local sobe");
+    assert!(cloud.join("Fotos/RAW/big.raw").exists(), "ignorado não é apagado na nuvem");
+
+    let down_rules = compile_rules(&sels, ItemState::Download).unwrap();
+    let jobid = client
+        .call_async(
+            "sync/sync",
+            json!({ "srcFs": s(&cloud), "dstFs": s(&local), "_group": "t6", "_filter": { "FilterRule": down_rules } }),
+        )
+        .await
+        .unwrap();
+    let st = wait_job(&client, jobid).await;
+    assert!(st.success, "download seletivo: {}", st.error);
+    assert!(local.join("Docs/x.pdf").exists(), "arquivo marcado como offline desce");
+    assert!(local.join("Fotos/a.jpg").exists(), "espelho filtrado não apaga o que está fora do filtro");
+
     // --- erro limpo para remote inexistente ---
     let err = client.fsinfo("naoexiste:").await.unwrap_err().to_string();
     assert!(!err.contains('\u{1b}'));

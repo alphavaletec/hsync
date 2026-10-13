@@ -6,12 +6,19 @@
   import Toasts from "./lib/components/ui/Toasts.svelte";
   import Accounts from "./lib/components/views/Accounts.svelte";
   import Dashboard from "./lib/components/views/Dashboard.svelte";
+  import Files from "./lib/components/views/Files.svelte";
   import Jobs from "./lib/components/views/Jobs.svelte";
   import Settings from "./lib/components/views/Settings.svelte";
   import { app, type View } from "./lib/stores/app.svelte";
 
-  const CRUMB: Record<View, string> = { dashboard: "painel", jobs: "tarefas", accounts: "contas", settings: "config" };
-  const ORDER: View[] = ["dashboard", "jobs", "accounts", "settings"];
+  const CRUMB: Record<View, string> = {
+    dashboard: "painel",
+    files: "arquivos",
+    jobs: "tarefas",
+    accounts: "contas",
+    settings: "config",
+  };
+  const ORDER: View[] = ["dashboard", "files", "jobs", "accounts", "settings"];
 
   // Durante um reinício o app continua navegável (dados podem estar defasados).
   const gated = $derived(!["ready", "restarting"].includes(app.daemon.state));
@@ -21,7 +28,7 @@
   });
 
   function onkeydown(e: KeyboardEvent) {
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && /^[1-4]$/.test(e.key)) {
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && /^[1-5]$/.test(e.key)) {
       e.preventDefault();
       app.view = ORDER[Number(e.key) - 1];
     }
@@ -58,6 +65,8 @@
         <Gate />
       {:else if app.view === "dashboard"}
         <Dashboard />
+      {:else if app.view === "files"}
+        <Files />
       {:else if app.view === "jobs"}
         <Jobs />
       {:else if app.view === "accounts"}

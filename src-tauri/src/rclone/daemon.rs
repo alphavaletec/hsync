@@ -578,10 +578,15 @@ pub(crate) fn parse_log_line(line: &str) -> LogLine {
         #[serde(default)]
         msg: String,
     }
-    match serde_json::from_str::<Raw>(line) {
+    let mut entry = match serde_json::from_str::<Raw>(line) {
         Ok(r) => LogLine { time: r.time, level: r.level, msg: clean_error(&r.msg) },
         Err(_) => LogLine { time: String::new(), level: "info".into(), msg: clean_error(line) },
+    };
+    // O rclone registra o usuário do RC em claro; ele não deve chegar à UI nem ao log.
+    if entry.msg.starts_with("Using --user") {
+        entry.msg = "Autenticação do RC ativa (credenciais efêmeras)".into();
     }
+    entry
 }
 
 pub(crate) fn parse_port(msg: &str) -> Option<u16> {
@@ -608,5 +613,11 @@ mod tests {
         assert_eq!(parse_port("Using --user u1 --pass XXXX as authenticated user"), None);
         let entry = parse_log_line("texto solto\n");
         assert_eq!(entry.msg, "texto solto");
+    }
+
+    #[test]
+    fn redacts_rc_user() {
+        let line = r#"{"level":"info","msg":"Using --user dce14d7e52ad --pass XXXX as authenticated user"}"#;
+        assert!(!parse_log_line(line).msg.contains("dce14d7e52ad"));
     }
 }

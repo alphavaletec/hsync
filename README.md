@@ -4,6 +4,7 @@ Gerenciador visual de sincronização e backup em nuvem (Google Drive, OneDrive,
 
 - 100% local: o tráfego vai direto do seu computador para o provedor. Tokens e senhas ficam no `rclone.conf` deste PC, sem nenhum servidor intermediário.
 - Modos **cópia**, **espelho** (sync) e **bidirecional** (bisync), com filtros, simulação (dry-run) e agendamento.
+- **Aba Arquivos:** navega qualquer conta, mesclando a nuvem com a cópia local. Cada arquivo ou pasta recebe um estado: **⇄ sincronizar**, **↓ manter offline**, **↑ só enviar** ou **⊘ ignorar**. Também dá para baixar e enviar na hora.
 - Monitoramento em tempo real: velocidade, progresso, arquivos em transferência, histórico e log.
 - Fica na bandeja: fechar a janela não interrompe os agendamentos.
 
@@ -21,6 +22,19 @@ Svelte (webview) ──invoke/eventos──▶ Rust (Tauri) ──HTTP 127.0.0.1
 - No Windows, o rclone roda num *Job Object* com `KILL_ON_JOB_CLOSE`: se o HSync travar, o rclone morre junto.
 - Watchdog: health check a cada 5 s e reinício com backoff exponencial. Depois de 5 falhas em 2 minutos, o app pede uma ação do usuário. Tarefas em andamento numa queda são marcadas como `interrompida`.
 - Telemetria: polling de `core/stats` por grupo (`job-<id>`) a cada 1 s, com eventos `job-progress` para a UI.
+
+### Seleção por item (aba Arquivos)
+
+Cada conta tem uma pasta local base (padrão `~/HSync/<conta>`). Os estados marcados viram até três tarefas *gerenciadas*, todas com raiz `conta:` ↔ pasta base:
+
+| Estado | Tarefa | Operação rclone |
+|---|---|---|
+| ⇄ sincronizar | `<conta> ⇄ sincronizados` | `bisync` (local = path1; resync com `resyncMode newer`) |
+| ↓ manter offline | `<conta> ↓ offline` | `sync` nuvem → local (a pasta local espelha a nuvem) |
+| ↑ só enviar | `<conta> ↑ envio` | `copy` local → nuvem (nunca apaga na nuvem) |
+| ⊘ ignorar | — | exclui o item das tarefas dos ancestrais |
+
+As regras são compiladas do caminho mais profundo para o mais raso (`+ /Fotos/**`, `- /Fotos/RAW/**`, …, `- **`). Assim, o estado mais específico de cada item prevalece. Ao alterar a seleção, o bisync refaz o resync, que une os dois lados e nunca apaga. Excluir uma tarefa gerenciada desmarca os itens daquele estado.
 
 | Pasta | Conteúdo |
 |---|---|
