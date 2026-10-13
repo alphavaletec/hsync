@@ -24,5 +24,7 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Os renderizadores de Office (pptx/xlsx) são chunks grandes, mas carregados sob demanda.
+    chunkSizeWarningLimit: 1500,
   },
 });

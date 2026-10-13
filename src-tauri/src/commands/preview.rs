@@ -24,8 +24,11 @@ const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const IMAGE: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"];
 const AUDIO: &[&str] = &["mp3", "wav", "ogg", "oga", "m4a", "aac", "flac", "opus"];
 const VIDEO: &[&str] = &["mp4", "webm", "m4v", "ogv"];
+// Renderizados no frontend (docx-preview, SheetJS, pptx-renderer). Formatos binários antigos
+// (.doc, .ppt) não têm renderizador local e ficam só com "abrir no aplicativo".
+const SHEET: &[&str] = &["xlsx", "xlsm", "xls", "ods", "csv", "tsv"];
 const TEXT: &[&str] = &[
-    "txt", "md", "markdown", "csv", "tsv", "log", "json", "jsonl", "xml", "yml", "yaml", "toml", "ini", "cfg", "conf",
+    "txt", "md", "markdown", "log", "json", "jsonl", "xml", "yml", "yaml", "toml", "ini", "cfg", "conf",
     "env", "html", "htm", "css", "scss", "js", "mjs", "ts", "tsx", "jsx", "svelte", "vue", "py", "rs", "go", "java",
     "kt", "c", "h", "cpp", "hpp", "cs", "php", "rb", "sh", "bash", "ps1", "bat", "cmd", "sql", "srt", "vtt", "tex",
     "gitignore", "dockerfile", "properties", "rtf",
@@ -46,6 +49,9 @@ pub enum PreviewKind {
     Text,
     Audio,
     Video,
+    Docx,
+    Sheet,
+    Slides,
     Other,
 }
 
@@ -81,6 +87,12 @@ fn kind_for(ext: &str) -> PreviewKind {
         PreviewKind::Audio
     } else if VIDEO.contains(&ext) {
         PreviewKind::Video
+    } else if ext == "docx" {
+        PreviewKind::Docx
+    } else if ext == "pptx" {
+        PreviewKind::Slides
+    } else if SHEET.contains(&ext) {
+        PreviewKind::Sheet
     } else if TEXT.contains(&ext) {
         PreviewKind::Text
     } else {
@@ -254,7 +266,11 @@ mod tests {
         assert_eq!(kind_for(&extension("foto.JPeG")), PreviewKind::Image);
         assert_eq!(kind_for(&extension("notas.md")), PreviewKind::Text);
         assert_eq!(kind_for(&extension(".gitignore")), PreviewKind::Text);
-        assert_eq!(kind_for(&extension("planilha.xlsx")), PreviewKind::Other);
+        assert_eq!(kind_for(&extension("planilha.xlsx")), PreviewKind::Sheet);
+        assert_eq!(kind_for(&extension("dados.CSV")), PreviewKind::Sheet);
+        assert_eq!(kind_for(&extension("contrato.docx")), PreviewKind::Docx);
+        assert_eq!(kind_for(&extension("aula.pptx")), PreviewKind::Slides);
+        assert_eq!(kind_for(&extension("antigo.doc")), PreviewKind::Other);
         assert!(!OPEN_EXTERNAL.contains(&extension("setup.exe").as_str()));
         assert!(!OPEN_EXTERNAL.contains(&extension("atalho.lnk").as_str()));
     }

@@ -7,6 +7,7 @@
   import type { FileEntry, Preview } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { formatBytes } from "../../utils/format";
+  import OfficePreview from "./OfficePreview.svelte";
 
   let {
     remote,
@@ -100,6 +101,10 @@
             <span class="text-[14px]">{preview.name}</span>
             <audio {src} controls class="w-[420px]"></audio>
           </div>
+        {:else if preview.kind === "docx" || preview.kind === "sheet" || preview.kind === "slides"}
+          {#key preview.localPath}
+            <OfficePreview kind={preview.kind} localPath={preview.localPath} />
+          {/key}
         {:else if preview.kind === "text"}
           <div class="selectable h-full overflow-auto py-3 text-[12px] leading-[1.6]">
             <table class="border-collapse">
@@ -121,7 +126,7 @@
             <FileQuestion size={36} class="text-dim" />
             <p class="text-[13px]">sem pré-visualização para este tipo de arquivo</p>
             {#if preview.canOpenExternal}
-              <p class="text-[11.5px] text-muted">abra no aplicativo instalado (Word, Excel, etc.)</p>
+              <p class="text-[11.5px] text-muted">formatos antigos (.doc, .ppt) e outros: abra no aplicativo instalado</p>
             {:else}
               <p class="text-[11.5px] text-muted">por segurança, o HSync não abre este tipo de arquivo</p>
             {/if}

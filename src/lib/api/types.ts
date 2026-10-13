@@ -214,7 +214,7 @@ export interface FilesConfig {
   jobs: Job[];
 }
 
-export type PreviewKind = "image" | "pdf" | "text" | "audio" | "video" | "other";
+export type PreviewKind = "image" | "pdf" | "text" | "audio" | "video" | "docx" | "sheet" | "slides" | "other";
 
 export interface Preview {
   kind: PreviewKind;
