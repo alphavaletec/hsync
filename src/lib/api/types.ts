@@ -157,7 +157,7 @@ export interface RcloneOption {
 
 export type ConfigStep =
   | { step: "done" }
-  | { step: "question"; state: string; option: RcloneOption; error: string | null }
+  | { step: "question"; state: string; option: RcloneOption | null; error: string | null }
   | { step: "oAuth"; jobId: number };
 
 export interface OAuthProgress {

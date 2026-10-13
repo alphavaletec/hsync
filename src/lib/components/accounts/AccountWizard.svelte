@@ -97,6 +97,11 @@
       }
       phase = "done";
     } else if (step.step === "question") {
+      if (!step.option) {
+        // Passo sem pergunta (o provedor só devolveu um erro): não há como continuar daqui.
+        fail(step.error ?? "O provedor não devolveu a próxima etapa da configuração.");
+        return;
+      }
       // Mesma pergunta de novo sem erro do provedor: deixa claro em vez de parecer travado.
       const repeated = previousState === step.state && !step.error;
       question = {
@@ -148,7 +153,7 @@
   }
 
   async function answer(value: string) {
-    if (!question) return;
+    if (!question || busy) return;
     busy = true;
     try {
       await handle(await api.answerConfig(name, kind, question.state, value));
@@ -290,7 +295,7 @@
     </div>
   {:else if phase === "question" && question}
     <div class="sec-label mb-3">{providerLabel(kind)} · {question.option.Name}</div>
-    {#key question.state}
+    {#key `${question.state}|${question.option.Name}`}
       <ConfigQuestion option={question.option} error={question.error} {busy} onanswer={answer} />
     {/key}
   {:else if phase === "oauth"}

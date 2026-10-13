@@ -196,6 +196,8 @@ pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<Provide
 /// automaticamente as perguntas que o app já resolve sozinho.
 async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mut res: Value) -> AppResult<ConfigStep> {
     let mode = pending_kind(state, name).unwrap_or(PendingKind::Create);
+    // Erro do provedor que o rclone devolve sem pergunta: mostrado junto da próxima pergunta.
+    let mut carried_error: Option<String> = None;
     for _ in 0..20 {
         let out = RcClient::parse_config_output(res.clone())?;
         log::info!(
@@ -208,8 +210,17 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
             state.pending_remotes.lock().unwrap().remove(name);
             return Ok(ConfigStep::Done);
         }
+        let error = Some(clean_error(&out.error)).filter(|e| !e.is_empty());
         let option = out.option.unwrap_or(Value::Null);
         let opt_name = option.get("Name").and_then(Value::as_str).unwrap_or_default();
+        if option.is_null() {
+            // `fs.ConfigError(state, msg)`: o rclone espera que o próximo passo seja `state`.
+            carried_error = error.or(carried_error);
+            res = client
+                .call_timeout(mode.rc_path(), continue_params(mode, name, kind, &out.state, ""), Some(CONFIG_STEP_TIMEOUT))
+                .await?;
+            continue;
+        }
         match opt_name {
             // Fluxo OAuth com servidor local do próprio rclone (redirect para 127.0.0.1:53682).
             "config_is_local" => {
@@ -224,8 +235,7 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
                     .await?;
             }
             _ => {
-                let error = Some(clean_error(&out.error)).filter(|e| !e.is_empty());
-                return Ok(ConfigStep::Question { state: out.state, option, error });
+                return Ok(ConfigStep::Question { state: out.state, option, error: error.or(carried_error) });
             }
         }
     }
