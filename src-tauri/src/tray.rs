@@ -89,6 +89,7 @@ pub fn request_quit(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
         state.jobs.stop_all_and_wait().await;
+        state.ondemand.disconnect_all();
         state.daemon.shutdown().await;
         app.exit(0);
     });

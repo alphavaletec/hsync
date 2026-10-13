@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod jobs;
+mod ondemand;
 mod rclone;
 mod secret;
 mod state;
@@ -59,6 +60,7 @@ pub fn run() {
             );
             // Diretório curto: o bisync monta nomes de arquivo com os dois caminhos (MAX_PATH no Windows).
             let jobs = JobManager::new(app.handle().clone(), daemon.clone(), store.clone(), local_dir.join("bs"));
+            let ondemand = ondemand::OnDemand::new(daemon.clone(), store.clone());
 
             commands::preview::clear_preview_cache(app.handle());
             tray::create(app.handle(), jobs.is_paused())?;
@@ -67,10 +69,13 @@ pub fn run() {
                 jobs: jobs.clone(),
                 store,
                 pending_remotes: Mutex::new(HashMap::new()),
+                ondemand: ondemand.clone(),
             });
 
             daemon.start();
             jobs.start_background();
+            // Contas com arquivos sob demanda voltam a responder ao Explorer.
+            ondemand.reconnect_all();
 
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(w) = app.get_webview_window("main") {
@@ -105,6 +110,9 @@ pub fn run() {
             commands::accounts::cancel_remote_config,
             commands::accounts::reauthorize_remote,
             commands::accounts::rename_remote,
+            commands::ondemand::ondemand_status,
+            commands::ondemand::enable_ondemand,
+            commands::ondemand::disable_ondemand,
             commands::accounts::test_remote,
             commands::accounts::delete_remote,
             commands::accounts::list_remote_dirs,

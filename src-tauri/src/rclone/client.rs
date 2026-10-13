@@ -150,6 +150,28 @@ impl RcClient {
         self.call("operations/mkdir", json!({ "fs": fs, "remote": remote })).await.map(|_| ())
     }
 
+    // ---- leitura direta de objetos (rcd --rc-serve) ----
+
+    /// Abre `remote:path` para leitura via HTTP (autenticado), opcionalmente só um trecho.
+    /// Usado pelos arquivos sob demanda para baixar exatamente o que o Windows pede.
+    pub async fn get_object(&self, remote: &str, path: &str, range: Option<(u64, u64)>) -> AppResult<reqwest::Response> {
+        let url = format!("{}/{}", self.base, object_url_path(remote, path));
+        let mut req = self
+            .http
+            .get(url)
+            .basic_auth(self.user.expose(), Some(self.pass.expose()))
+            // Arquivos grandes: o tempo total não pode ser limitado pelo timeout padrão de 30 s.
+            .timeout(Duration::from_secs(6 * 3600));
+        if let Some((start, end_inclusive)) = range {
+            req = req.header(reqwest::header::RANGE, format!("bytes={start}-{end_inclusive}"));
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            return Err(AppError::Rc(format!("HTTP {} ao ler {remote}:{path}", resp.status())));
+        }
+        Ok(resp)
+    }
+
     // ---- jobs / stats ----
 
     pub async fn job_status(&self, jobid: i64) -> AppResult<JobStatus> {
@@ -167,6 +189,65 @@ impl RcClient {
     pub async fn stats_delete(&self, group: &str) -> AppResult<()> {
         self.call("core/stats-delete", json!({ "group": group })).await.map(|_| ())
     }
+}
+
+/// Caminho HTTP de um objeto servido pelo rcd: `/[conta:]/pasta/arquivo`, com cada parte codificada.
+fn object_url_path(remote: &str, path: &str) -> String {
+    let mut out = percent_encode(&format!("[{remote}:]"));
+    for seg in path.split('/').filter(|s| !s.is_empty()) {
+        out.push('/');
+        out.push_str(&percent_encode(seg));
+    }
+    out
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Converte o `ModTime` do rclone (RFC 3339, ex. `2026-10-13T10:00:00.123-03:00`) em
+/// segundos desde 1970 (UTC). Implementação mínima, sem dependência de biblioteca de datas.
+pub fn parse_rfc3339_unix(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    let num = |r: std::ops::Range<usize>| -> Option<i64> { s.get(r)?.parse().ok() };
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || !(b[10] == b'T' || b[10] == b' ') {
+        return None;
+    }
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, se) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    let mut i = 19;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+    }
+    let offset = match b.get(i) {
+        Some(b'Z') | Some(b'z') | None => 0,
+        Some(&sign) if sign == b'+' || sign == b'-' => {
+            let oh = num(i + 1..i + 3)?;
+            let om = num(i + 4..i + 6)?;
+            let o = oh * 3600 + om * 60;
+            if sign == b'+' { o } else { -o }
+        }
+        _ => return None,
+    };
+    // Dias desde 1970-01-01 (algoritmo "days from civil" de Howard Hinnant).
+    let (y2, m2) = if mo <= 2 { (y - 1, mo + 9) } else { (y, mo - 3) };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let doy = (153 * m2 + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + se - offset)
 }
 
 /// Remove códigos de cor ANSI e prefixos de pânico das mensagens do rclone.
@@ -197,6 +278,24 @@ pub fn clean_error(msg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::clean_error;
+
+    #[test]
+    fn parses_rfc3339() {
+        use super::parse_rfc3339_unix as p;
+        assert_eq!(p("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(p("2026-10-13T13:00:00Z"), Some(1_791_896_400));
+        assert_eq!(p("2026-10-13T10:00:00.123456789-03:00"), Some(1_791_896_400));
+        assert_eq!(p("2024-02-29T12:00:00+02:00"), Some(1_709_200_800));
+        assert_eq!(p("lixo"), None);
+    }
+
+    #[test]
+    fn encodes_object_urls() {
+        assert_eq!(
+            super::object_url_path("Mega - AVT", "Clientes/Pasta X/arq ç.txt"),
+            "%5BMega%20-%20AVT%3A%5D/Clientes/Pasta%20X/arq%20%C3%A7.txt"
+        );
+    }
 
     #[test]
     fn strips_ansi_and_panic_prefix() {

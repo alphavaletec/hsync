@@ -347,6 +347,9 @@ pub async fn rename_remote(app: AppHandle, state: State<'_, AppState>, old: Stri
     }
     let client = state.daemon.client()?;
     ensure_remote(&client, &old).await?;
+    if state.ondemand.is_enabled(&old) {
+        return Err(AppError::invalid("Desative os arquivos sob demanda desta conta antes de renomear"));
+    }
     if client.list_remotes().await?.iter().any(|r| r != &old && r.eq_ignore_ascii_case(&new)) {
         return Err(AppError::invalid(format!("Já existe uma conta chamada \"{new}\"")));
     }
@@ -459,6 +462,9 @@ pub async fn test_remote(state: State<'_, AppState>, name: String) -> AppResult<
 
 #[tauri::command]
 pub async fn delete_remote(state: State<'_, AppState>, name: String) -> AppResult<()> {
+    if state.ondemand.is_enabled(&name) {
+        return Err(AppError::invalid("Desative os arquivos sob demanda desta conta antes de removê-la"));
+    }
     let users = state.store.jobs_using_remote(&name)?;
     if !users.is_empty() {
         return Err(AppError::invalid(format!(

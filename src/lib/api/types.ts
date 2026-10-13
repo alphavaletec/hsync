@@ -234,3 +234,10 @@ export interface Preview {
   canOpenExternal: boolean;
   fromLocalCopy: boolean;
 }
+
+export interface OnDemandStatus {
+  supported: boolean;
+  enabled: boolean;
+  connected: boolean;
+  path: string | null;
+}

@@ -13,6 +13,7 @@ import type {
   JobProgress,
   LogLine,
   OAuthProgress,
+  OnDemandStatus,
   Preview,
   Provider,
   Remote,
@@ -71,6 +72,10 @@ export const api = {
   previewFile: (remote: string, path: string, size: number, modTime: string | null) =>
     invoke<Preview>("preview_file", { remote, path, size, modTime }),
   openPreviewExternal: (localPath: string) => invoke<void>("open_preview_external", { localPath }),
+
+  ondemandStatus: (remote: string) => invoke<OnDemandStatus>("ondemand_status", { remote }),
+  enableOndemand: (remote: string) => invoke<OnDemandStatus>("enable_ondemand", { remote }),
+  disableOndemand: (remote: string) => invoke<void>("disable_ondemand", { remote }),
 
   // tarefas
   listJobs: () => invoke<Job[]>("list_jobs"),

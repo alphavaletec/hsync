@@ -7,4 +7,4 @@ pub use client::RcClient;
 pub use daemon::{Daemon, DaemonPaths, DaemonStatus};
 
 #[cfg(test)]
-mod integration_tests;
+pub(crate) mod integration_tests;

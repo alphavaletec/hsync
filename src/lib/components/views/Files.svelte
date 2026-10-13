@@ -20,7 +20,7 @@
   import { onDestroy } from "svelte";
   import { api, errorMessage } from "../../api/commands";
   import { on } from "../../api/events";
-  import type { FileEntry, FilesConfig, ItemState } from "../../api/types";
+  import type { FileEntry, FilesConfig, ItemState, OnDemandStatus } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { toasts } from "../../stores/toasts.svelte";
   import { ITEM_STATE, STATUS_COLOR, STATUS_LABEL, formatBytes, formatDateTime, formatInterval, providerLabel } from "../../utils/format";
@@ -84,6 +84,47 @@
     const r = remote;
     if (r) api.filesConfig(r).then((c) => (config = c)).catch((e) => toasts.push("err", errorMessage(e)));
   });
+
+  // Arquivos sob demanda (estilo OneDrive) desta conta.
+  let ondemand = $state<OnDemandStatus | null>(null);
+  let ondemandBusy = $state(false);
+  $effect(() => {
+    const r = remote;
+    ondemand = null;
+    if (r) api.ondemandStatus(r).then((s) => (ondemand = s)).catch(() => {});
+  });
+
+  async function enableOndemand() {
+    if (!remote) return;
+    ondemandBusy = true;
+    try {
+      ondemand = await api.enableOndemand(remote);
+      toasts.push("ok", `Arquivos sob demanda ativados: abra "HSync - ${remote}" no Explorer`, 7000);
+      if (ondemand.path) await revealItemInDir(ondemand.path).catch(() => {});
+    } catch (e) {
+      toasts.push("err", errorMessage(e));
+    } finally {
+      ondemandBusy = false;
+    }
+  }
+
+  async function disableOndemand() {
+    if (!remote) return;
+    const ok = await ask(
+      `Desativar os arquivos sob demanda de "${remote}"? A pasta sai do Explorer e vai para a Lixeira — os arquivos continuam na nuvem.`,
+      { title: "Arquivos sob demanda", kind: "warning", okLabel: "Desativar", cancelLabel: "Cancelar" },
+    );
+    if (!ok) return;
+    ondemandBusy = true;
+    try {
+      await api.disableOndemand(remote);
+      ondemand = await api.ondemandStatus(remote);
+    } catch (e) {
+      toasts.push("err", errorMessage(e));
+    } finally {
+      ondemandBusy = false;
+    }
+  }
 
   // Depois que uma sincronização desta conta (ou transferência avulsa) termina, atualiza a coluna "onde".
   let unlisten: (() => void) | undefined;
@@ -269,6 +310,36 @@
     {/if}
 
     {#if config}
+      {#if ondemand?.supported}
+        <div class="sec-label accent mt-4">sob demanda</div>
+        {#if ondemand.enabled}
+          <div class="flex items-center gap-2 text-[11.5px]">
+            <span class={ondemand.connected ? "text-ok" : "text-warn"}>{ondemand.connected ? "◆" : "◇"}</span>
+            <span class="text-muted">{ondemand.connected ? "no Explorer como" : "desconectado:"}</span>
+          </div>
+          <div class="text-[12px] font-semibold">HSync - {remote}</div>
+          <div class="selectable text-[11px] break-all text-dim" title={ondemand.path ?? ""}>{ondemand.path}</div>
+          <div class="flex gap-2">
+            <button class="btn h-7 flex-1 justify-center text-[11px]" onclick={() => ondemand?.path && revealItemInDir(ondemand.path)}>
+              <FolderOpen size={12} /> abrir
+            </button>
+            <button class="btn btn-danger h-7 flex-1 justify-center text-[11px]" onclick={disableOndemand} disabled={ondemandBusy}>desativar</button>
+          </div>
+          <p class="text-[11px] leading-snug text-dim">
+            tudo da nuvem aparece lá sem ocupar espaço e baixa ao abrir. Botão direito: "Sempre manter neste dispositivo" ou
+            "Liberar espaço". Por enquanto a pasta é somente leitura.
+          </p>
+        {:else}
+          <p class="text-[11px] leading-snug text-muted">
+            veja todos os arquivos da conta numa pasta do Explorer, como no OneDrive — eles só são baixados quando você
+            abre.
+          </p>
+          <button class="btn h-7 justify-center text-[11px]" onclick={enableOndemand} disabled={ondemandBusy}>
+            <Cloud size={12} /> {ondemandBusy ? "ativando…" : "ativar arquivos sob demanda"}
+          </button>
+        {/if}
+      {/if}
+
       <div class="sec-label accent mt-4">cópia local</div>
       <div class="selectable text-[11.5px] break-all text-muted" title={config.base}>{config.base}</div>
       <div class="flex gap-2">

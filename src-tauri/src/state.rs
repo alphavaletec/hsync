@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::jobs::{JobManager, Store};
+use crate::ondemand::OnDemand;
 use crate::rclone::Daemon;
 
 pub struct AppState {
@@ -10,6 +11,7 @@ pub struct AppState {
     pub store: Arc<Store>,
     /// Configurações de conta em andamento no wizard.
     pub pending_remotes: Mutex<HashMap<String, PendingKind>>,
+    pub ondemand: Arc<OnDemand>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

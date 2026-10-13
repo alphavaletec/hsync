@@ -404,6 +404,8 @@ impl Daemon {
             .arg(&self.paths.cache)
             .args(["--ask-password=false", "--use-json-log", "--log-level", "INFO"])
             .args(["--rc-job-expire-duration", "10m"])
+            // Serve objetos dos remotes por HTTP (mesma autenticação do RC): leitura sob demanda.
+            .arg("--rc-serve")
             // Credenciais via ambiente: não aparecem na linha de comando do processo.
             .env("RCLONE_RC_USER", user.expose())
             .env("RCLONE_RC_PASS", pass.expose())

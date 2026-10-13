@@ -345,6 +345,18 @@ impl Store {
             .optional()?)
     }
 
+    pub fn settings_with_prefix(&self, prefix: &str) -> AppResult<Vec<(String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1")?;
+        let rows = stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn delete_setting(&self, key: &str) -> AppResult<()> {
+        self.conn.lock().unwrap().execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> AppResult<()> {
         self.conn.lock().unwrap().execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",

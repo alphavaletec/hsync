@@ -13,18 +13,18 @@ use super::filters::Filters;
 use super::RcClient;
 use crate::secret::{random_token, Secret};
 
-fn rclone_bin() -> Option<PathBuf> {
+pub(crate) fn rclone_bin() -> Option<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
     std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
         p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("rclone-"))
     })
 }
 
-async fn start_rcd(bin: &Path, config: &Path) -> (Child, RcClient) {
+pub(crate) async fn start_rcd(bin: &Path, config: &Path) -> (Child, RcClient) {
     let user = Secret::from(random_token(8));
     let pass = Secret::from(random_token(16));
     let mut child = Command::new(bin)
-        .args(["rcd", "--rc-addr", "127.0.0.1:0", "--ask-password=false", "--use-json-log"])
+        .args(["rcd", "--rc-addr", "127.0.0.1:0", "--ask-password=false", "--use-json-log", "--rc-serve"])
         .arg("--config")
         .arg(config)
         .env("RCLONE_RC_USER", user.expose())
