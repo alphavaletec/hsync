@@ -16,8 +16,8 @@
   type Phase = "provider" | "details" | "starting" | "question" | "oauth" | "testing" | "done" | "error";
 
   const FEATURED = [
-    { kind: "drive", name: "gdrive", hint: "OAuth no navegador" },
-    { kind: "onedrive", name: "onedrive", hint: "OAuth no navegador" },
+    { kind: "drive", name: "gdrive", hint: "login pelo navegador" },
+    { kind: "onedrive", name: "onedrive", hint: "login pelo navegador" },
     { kind: "mega", name: "mega", hint: "e-mail e senha" },
   ];
   const HELP_URL: Record<string, string> = {
@@ -40,6 +40,7 @@
   let name = $state(reauth?.name ?? "");
   let params = $state<Record<string, string>>({});
   let otherKind = $state("");
+  let showKeys = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let question = $state<{ state: string; option: RcloneOption; error: string | null } | null>(null);
@@ -194,28 +195,41 @@
       </div>
 
       {#if kind === "drive" || kind === "onedrive"}
-        {#if kind === "drive"}
-          <div class="flex items-start gap-2 border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-            <TriangleAlert size={15} class="mt-0.5 shrink-0" />
-            <span>
-              O client_id compartilhado do rclone para o Google Drive está sendo descontinuado em 2026. Crie o seu
-              (gratuito) e informe abaixo para evitar interrupções e limites de uso.
-            </span>
-          </div>
-        {/if}
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="field-label" for="cid">client_id {kind === "drive" ? "(recomendado)" : "(opcional)"}</label>
-            <input id="cid" class="input" bind:value={params.client_id} autocomplete="off" />
-          </div>
-          <div>
-            <label class="field-label" for="csec">client_secret</label>
-            <input id="csec" class="input" type="password" bind:value={params.client_secret} autocomplete="off" />
-          </div>
+        <div class="term flex items-start gap-3 px-4 py-3 text-[12.5px]">
+          <ExternalLink size={16} class="mt-0.5 shrink-0 text-accent" />
+          <span>
+            Ao clicar em <span class="text-accent">conectar</span>, o navegador abre na página de login
+            {kind === "drive" ? "do Google" : "da Microsoft"}. Entre na sua conta e autorize — o HSync recebe o acesso
+            direto neste PC. Não é preciso criar chaves.
+          </span>
         </div>
-        <button class="flex items-center gap-1 self-start text-[11.5px] text-accent hover:underline" onclick={() => openUrl(HELP_URL[kind])}>
-          <ExternalLink size={12} /> como criar meu client_id
+        <button class="self-start text-[11.5px] text-muted hover:text-fg" onclick={() => (showKeys = !showKeys)}>
+          {showKeys ? "▾" : "▸"} avançado: usar meu próprio client_id
         </button>
+        {#if showKeys}
+          {#if kind === "drive"}
+            <div class="flex items-start gap-2 border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+              <TriangleAlert size={15} class="mt-0.5 shrink-0" />
+              <span>
+                Sem client_id próprio, o login usa a chave compartilhada do rclone, que o Google está descontinuando em
+                2026 e pode ficar lenta ou falhar. Com uma chave sua (gratuita) a conexão não depende disso.
+              </span>
+            </div>
+          {/if}
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="field-label" for="cid">client_id</label>
+              <input id="cid" class="input" bind:value={params.client_id} autocomplete="off" />
+            </div>
+            <div>
+              <label class="field-label" for="csec">client_secret</label>
+              <input id="csec" class="input" type="password" bind:value={params.client_secret} autocomplete="off" />
+            </div>
+          </div>
+          <button class="flex items-center gap-1 self-start text-[11.5px] text-accent hover:underline" onclick={() => openUrl(HELP_URL[kind])}>
+            <ExternalLink size={12} /> como criar meu client_id
+          </button>
+        {/if}
         {#if kind === "drive"}
           <div>
             <label class="field-label" for="scope">acesso</label>
