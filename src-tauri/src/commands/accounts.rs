@@ -198,6 +198,12 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
     let mode = pending_kind(state, name).unwrap_or(PendingKind::Create);
     for _ in 0..20 {
         let out = RcClient::parse_config_output(res.clone())?;
+        log::info!(
+            "conta {name}: próximo passo {:?} pergunta {:?}{}",
+            out.state,
+            out.option.as_ref().and_then(|o| o.get("Name")).and_then(Value::as_str).unwrap_or(""),
+            if out.error.is_empty() { String::new() } else { format!(" erro: {}", clean_error(&out.error)) }
+        );
         if out.state.is_empty() {
             state.pending_remotes.lock().unwrap().remove(name);
             return Ok(ConfigStep::Done);
@@ -213,7 +219,9 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
             // O wizard já avisou sobre o client_id compartilhado do Google estar sendo descontinuado.
             // Reautorização: "já existe um token, renovar?" — é exatamente o que foi pedido.
             "config_shared_client_id" | "config_refresh_token" => {
-                res = client.call(mode.rc_path(), continue_params(mode, name, kind, &out.state, "true")).await?;
+                res = client
+                    .call_timeout(mode.rc_path(), continue_params(mode, name, kind, &out.state, "true"), Some(CONFIG_STEP_TIMEOUT))
+                    .await?;
             }
             _ => {
                 let error = Some(clean_error(&out.error)).filter(|e| !e.is_empty());
@@ -223,6 +231,9 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
     }
     Err(AppError::invalid("O assistente de configuração do rclone não convergiu"))
 }
+
+/// Alguns passos consultam o provedor (ex.: listar os drives do OneDrive) e podem demorar.
+const CONFIG_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 fn continue_params(mode: PendingKind, name: &str, kind: &str, st: &str, result: &str) -> Value {
     let mut params = json!({
@@ -299,7 +310,11 @@ pub async fn answer_config(
     let mode = pending_kind(&state, &name)
         .ok_or_else(|| AppError::invalid("Nenhuma configuração em andamento para esta conta"))?;
     let client = state.daemon.client()?;
-    let res = client.call(mode.rc_path(), continue_params(mode, &name, &kind, &config_state, &result)).await;
+    // O valor da resposta não vai para o log (pode ser uma senha).
+    log::info!("conta {name}: respondendo {config_state:?} ({mode:?})");
+    let res = client
+        .call_timeout(mode.rc_path(), continue_params(mode, &name, &kind, &config_state, &result), Some(CONFIG_STEP_TIMEOUT))
+        .await;
     let step = match res {
         Ok(res) => advance(&state, &client, &name, &kind, res).await,
         Err(e) => Err(e),

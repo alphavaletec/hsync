@@ -84,6 +84,7 @@
   }
 
   async function handle(step: ConfigStep) {
+    const previousState = question?.state;
     question = null;
     if (step.step === "done") {
       created = true;
@@ -96,7 +97,13 @@
       }
       phase = "done";
     } else if (step.step === "question") {
-      question = { state: step.state, option: step.option, error: step.error };
+      // Mesma pergunta de novo sem erro do provedor: deixa claro em vez de parecer travado.
+      const repeated = previousState === step.state && !step.error;
+      question = {
+        state: step.state,
+        option: step.option,
+        error: repeated ? "O provedor pediu esta informação de novo. Confira a escolha e continue." : step.error,
+      };
       phase = "question";
     } else {
       phase = "oauth";

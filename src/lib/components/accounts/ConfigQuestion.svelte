@@ -1,5 +1,6 @@
 <script lang="ts">
   // Renderiza uma pergunta genérica da máquina de estados do `config/create` do rclone.
+  import { LoaderCircle } from "@lucide/svelte";
   import type { RcloneOption } from "../../api/types";
 
   let {
@@ -52,6 +53,12 @@
         continuar
       </button>
     </div>
+  {/if}
+
+  {#if busy}
+    <p class="flex items-center gap-2 text-[12px] text-muted">
+      <LoaderCircle size={14} class="spin text-accent" /> consultando o provedor… (pode levar alguns segundos)
+    </p>
   {/if}
 
   {#if error}
