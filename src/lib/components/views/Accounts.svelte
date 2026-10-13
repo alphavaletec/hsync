@@ -18,6 +18,14 @@
   let renameError = $state<string | null>(null);
   let renameBusy = $state(false);
 
+  // O card inteiro abre a conta em Arquivos; botões dentro dele e seleção de texto (ex.: copiar um erro) não.
+  function openFiles(r: Remote, e: Event) {
+    if ((e.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+    if (e.type === "click" && window.getSelection()?.toString()) return;
+    app.filesRemote = r.name;
+    app.view = "files";
+  }
+
   function startRename(r: Remote) {
     renaming = r;
     newName = r.name;
@@ -105,7 +113,14 @@
   <div class="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-6">
     {#each app.remotes as r (r.name)}
       {@const t = tests[r.name]}
-      <article class="node flex flex-col px-4 py-4">
+      <div
+        class="node flex cursor-pointer flex-col px-4 py-4 transition-colors hover:border-accent-dim focus-visible:border-accent focus-visible:outline-none"
+        role="button"
+        tabindex="0"
+        title="Abrir {r.name}: na aba Arquivos"
+        onclick={(e) => openFiles(r, e)}
+        onkeydown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openFiles(r, e))}
+      >
         <span class="node-dot"></span>
         <div class="flex items-center gap-3">
           <ProviderLogo kind={r.kind} size={22} />
@@ -155,7 +170,7 @@
           <button class="btn btn-icon ml-auto" onclick={() => startRename(r)} title="Renomear" aria-label="Renomear {r.name}"><Pencil size={13} /></button>
           <button class="btn btn-icon btn-danger" onclick={() => remove(r)} title="Remover"><Trash2 size={14} /></button>
         </div>
-      </article>
+      </div>
     {/each}
   </div>
 </section>
