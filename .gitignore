@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Binários do Rclone são baixados por scripts/fetch-rclone.*
+src-tauri/binaries/rclone-*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Config de build local por máquina
+src-tauri/.cargo/config.toml
+
+# Referências visuais locais
+videoframe_*.png
