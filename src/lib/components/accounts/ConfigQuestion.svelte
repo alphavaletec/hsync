@@ -10,10 +10,13 @@
     onanswer,
   }: { option: RcloneOption; error?: string | null; busy?: boolean; onanswer: (value: string) => void } = $props();
 
-  // Provedores podem repetir itens (o OneDrive lista o mesmo drive em /me/drives e /me/drive).
+  const isDefault = (v: string) => !!option.DefaultStr && v === option.DefaultStr;
+  // Provedores podem repetir itens (o OneDrive lista o mesmo drive em /me/drives e /me/drive);
+  // o padrão sugerido pelo provedor vem primeiro.
   const examples = $derived.by(() => {
     const seen = new Set<string>();
-    return (option.Examples ?? []).filter((ex) => !seen.has(ex.Value) && (seen.add(ex.Value), true));
+    const unique = (option.Examples ?? []).filter((ex) => !seen.has(ex.Value) && (seen.add(ex.Value), true));
+    return unique.sort((a, b) => Number(isDefault(b.Value)) - Number(isDefault(a.Value)));
   });
   const isBool = $derived(option.Type === "bool");
   const fixedChoice = $derived(option.Exclusive && examples.length > 0);
@@ -26,6 +29,8 @@
     return option.Exclusive || option.Required ? list[0].Value : def;
   }
   let value = $state(initialValue());
+  // Com sugestões na tela, digitar um valor livre é exceção: fica escondido até pedir.
+  let typing = $state(false);
 
   const canAnswer = $derived(!busy && !((option.Required || fixedChoice) && !value));
 
@@ -50,14 +55,23 @@
           <label class="flex cursor-pointer items-start gap-3 px-3 py-1.5 hover:bg-node">
             <input type="radio" bind:group={value} value={ex.Value} disabled={busy} class="mt-1 accent-[#5cb8e4]" />
             <span class="min-w-0">
-              <span class="block truncate">{ex.Help || ex.Value}</span>
+              <span class="flex items-center gap-2">
+                <span class="truncate">{ex.Help || ex.Value}</span>
+                {#if isDefault(ex.Value)}
+                  <span class="badge shrink-0 text-ok" title="Sugestão do provedor — normalmente a escolha certa">padrão</span>
+                {/if}
+              </span>
               {#if ex.Help && ex.Help !== ex.Value}<span class="block truncate text-[11px] text-dim">{ex.Value}</span>{/if}
             </span>
           </label>
         {/each}
       </div>
     {/if}
-    {#if !fixedChoice}
+    {#if !fixedChoice && examples.length > 0 && !typing}
+      <button class="self-start text-[11.5px] text-dim hover:text-accent" disabled={busy} onclick={() => (typing = true)}>
+        não está na lista? digitar outro valor
+      </button>
+    {:else if !fixedChoice}
       <input
         class="input"
         type={option.IsPassword ? "password" : "text"}
