@@ -3,9 +3,9 @@
   import { api } from "../../api/commands";
   import { app } from "../../stores/app.svelte";
   import { formatBytes, formatRelative, formatSpeed } from "../../utils/format";
-  import FlowDiagram from "../dashboard/FlowDiagram.svelte";
   import LogPanel from "../dashboard/LogPanel.svelte";
   import Sparkline from "../dashboard/Sparkline.svelte";
+  import TopologyMap from "../dashboard/TopologyMap.svelte";
   import TransferDashboard from "../dashboard/TransferDashboard.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
@@ -23,13 +23,6 @@
   });
   const nextJob = $derived(
     app.jobs.filter((j) => j.nextRunAt && !j.running).sort((a, b) => a.nextRunAt! - b.nextRunAt!)[0],
-  );
-  // Tarefa mostrada no diagrama: a primeira ativa, senão a próxima agendada, senão a última executada.
-  const focusJob = $derived(
-    app.jobs.find((j) => j.id === active[0]?.jobId) ??
-      nextJob ??
-      app.jobs.find((j) => j.id === app.runs[0]?.jobId) ??
-      app.jobs[0],
   );
   const today = $derived.by(() => {
     const start = new Date(now);
@@ -85,24 +78,27 @@
   {/snippet}
 </ViewHeader>
 
-<div class="grid min-h-0 grid-cols-[minmax(0,1fr)_330px] border-t border-line-soft">
+<section class="border-t border-line-soft px-5 pt-4 pb-5">
+  <div class="mb-4 flex items-center justify-between">
+    <div class="sec-label accent">mapa de sincronização</div>
+    <div class="flex gap-4 text-[11px] text-dim">
+      <span><span class="text-accent">━</span> sincronizando</span>
+      <span><span class="text-[#3b4248]">━</span> ociosa</span>
+      <span><span class="text-err">┅</span> falhou</span>
+      <span>este PC ← rclone → nuvem</span>
+    </div>
+  </div>
+  <TopologyMap />
+</section>
+
+<div class="grid min-h-0 grid-cols-[minmax(0,1fr)_300px] border-t border-line-soft">
   <section class="flex min-w-0 flex-col gap-3 px-5 py-4">
     <div class="sec-label">transferências</div>
     <TransferDashboard />
-    <div class="sec-label mt-2">log</div>
-    <LogPanel />
   </section>
 
   <aside class="flex flex-col gap-3 border-l border-line-soft px-5 py-4">
-    <div class="sec-label accent">fluxo</div>
-    {#if focusJob}
-      <div class="text-center text-[11.5px] text-muted">{focusJob.name}</div>
-      <FlowDiagram source={focusJob.source} dest={focusJob.dest} mode={focusJob.mode} active={!!focusJob.running} />
-    {:else}
-      <p class="text-[12px] text-dim">nenhuma tarefa configurada.</p>
-    {/if}
-
-    <div class="sec-label mt-3">velocidade</div>
+    <div class="sec-label">velocidade</div>
     <Sparkline samples={app.speedHistory} />
 
     <div class="sec-label mt-3">hoje</div>
@@ -118,3 +114,8 @@
     </dl>
   </aside>
 </div>
+
+<section class="border-t border-line-soft px-5 py-4">
+  <div class="sec-label mb-3">log</div>
+  <LogPanel />
+</section>

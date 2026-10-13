@@ -188,6 +188,7 @@
   }
 </script>
 
+<div class="flex h-full flex-col">
 <ViewHeader
   num="02"
   crumb="arquivos"
@@ -201,9 +202,9 @@
   {/snippet}
 </ViewHeader>
 
-<div class="grid min-h-0 grid-cols-[230px_minmax(0,1fr)] border-t border-line-soft">
+<div class="grid min-h-0 flex-1 grid-cols-[230px_minmax(0,1fr)] border-t border-line-soft">
   <!-- contas e configuração da cópia local -->
-  <aside class="flex flex-col gap-3 border-r border-line-soft px-4 py-4">
+  <aside class="flex min-h-0 flex-col gap-3 overflow-auto border-r border-line-soft px-4 py-4">
     <div class="sec-label">contas</div>
     {#each app.remotes as r (r.name)}
       <button
@@ -269,7 +270,7 @@
   </aside>
 
   <!-- navegador -->
-  <section class="flex min-w-0 flex-col gap-3 px-5 py-4">
+  <section class="flex min-h-0 min-w-0 flex-col gap-3 px-5 py-4">
     {#if remote}
       <div class="flex flex-wrap items-center gap-2">
         <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-[12.5px]">
@@ -297,15 +298,15 @@
         </div>
       {/if}
 
-      <div class="term min-h-0">
-        <div class="term-bar">
+      <div class="term flex min-h-0 flex-1 flex-col">
+        <div class="term-bar shrink-0">
           <span class="dots"><i></i><i></i><i></i></span>
           <span class="mx-auto">rclone — operations/list — {entries.length} itens</span>
         </div>
-        <div class="grid grid-cols-[28px_minmax(0,1fr)_90px_110px_96px_170px] items-center gap-x-3 border-b border-line px-3 py-1.5 text-[11px] text-dim">
+        <div class="grid shrink-0 grid-cols-[28px_minmax(0,1fr)_90px_110px_96px_170px] items-center gap-x-3 border-b border-line px-3 py-1.5 text-[11px] text-dim">
           <span></span><span>nome</span><span class="text-right">tamanho</span><span>modificado</span><span>onde</span><span>estado</span>
         </div>
-        <div class="max-h-[calc(100vh-330px)] min-h-[200px] overflow-auto">
+        <div class="min-h-0 flex-1 overflow-auto">
           {#if path}
             <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-muted hover:bg-node" onclick={() => (path = crumbs.slice(0, -1).join("/"))}>
               <ArrowUp size={14} class="ml-[38px]" /> ..
@@ -373,6 +374,7 @@
       </p>
     {/if}
   </section>
+</div>
 </div>
 
 {#if previewIndex !== null && remote && fileEntries.length}

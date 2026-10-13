@@ -1,16 +1,12 @@
 <script lang="ts">
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api } from "../api/commands";
-  import { app, type View } from "../stores/app.svelte";
+  import { app } from "../stores/app.svelte";
   import { formatSpeed } from "../utils/format";
+  import { VIEWS } from "../views";
 
-  const TABS: { id: View; label: string }[] = [
-    { id: "dashboard", label: "painel" },
-    { id: "files", label: "arquivos" },
-    { id: "jobs", label: "tarefas" },
-    { id: "accounts", label: "contas" },
-    { id: "settings", label: "config" },
-  ];
+  const current = $derived(VIEWS.find((v) => v.id === app.view) ?? VIEWS[0]);
+  const gated = $derived(!["ready", "restarting"].includes(app.daemon.state));
 
   const statusText = $derived.by(() => {
     switch (app.daemon.state) {
@@ -46,20 +42,12 @@
 </script>
 
 <footer class="flex h-8 shrink-0 items-stretch border-t border-line bg-[#16181b] text-[12px]">
-  <span class="flex items-center bg-accent px-3 font-semibold text-[#0c1a22]">[hsync]</span>
-  <nav class="flex items-stretch">
-    {#each TABS as tab, i (tab.id)}
-      <button
-        class="px-3 transition-colors hover:text-fg {app.view === tab.id ? 'text-fg' : 'text-muted'}"
-        onclick={() => (app.view = tab.id)}
-        title="Ctrl+{i + 1}"
-      >
-        {i}:{tab.label}{app.view === tab.id ? "*" : ""}
-      </button>
-    {/each}
-  </nav>
+  <span class="flex items-center bg-accent px-3 font-semibold text-[#0c1a22]">[{gated ? "hsync" : current.label}]</span>
+  <span class="flex min-w-0 items-center truncate px-3 text-muted">
+    {gated ? "aguardando o motor de sincronização" : current.summary}
+  </span>
 
-  <div class="ml-auto flex items-center gap-4 px-3 text-muted">
+  <div class="ml-auto flex shrink-0 items-center gap-4 px-3 text-muted">
     {#if app.settings?.schedulesPaused}
       <span class="text-warn">agendamentos pausados</span>
     {/if}

@@ -8,7 +8,7 @@ use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
-use super::daemon::{parse_log_line, parse_port};
+use super::daemon::{parse_log_lines, parse_port};
 use super::filters::Filters;
 use super::RcClient;
 use crate::secret::{random_token, Secret};
@@ -38,7 +38,7 @@ async fn start_rcd(bin: &Path, config: &Path) -> (Child, RcClient) {
     let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
     let port = tokio::time::timeout(Duration::from_secs(15), async {
         while let Some(line) = lines.next_line().await.unwrap() {
-            if let Some(p) = parse_port(&parse_log_line(&line).msg) {
+            if let Some(p) = parse_log_lines(&line).iter().find_map(|e| parse_port(&e.msg)) {
                 return p;
             }
         }

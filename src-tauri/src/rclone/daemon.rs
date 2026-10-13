@@ -421,16 +421,17 @@ impl Daemon {
             let mut port_tx = Some(port_tx);
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let entry = parse_log_line(&line);
-                if let Some(tx) = port_tx.take() {
-                    match parse_port(&entry.msg) {
-                        Some(p) => {
-                            let _ = tx.send(p);
+                for entry in parse_log_lines(&line) {
+                    if let Some(tx) = port_tx.take() {
+                        match parse_port(&entry.msg) {
+                            Some(p) => {
+                                let _ = tx.send(p);
+                            }
+                            None => port_tx = Some(tx),
                         }
-                        None => port_tx = Some(tx),
                     }
+                    me.push_log(entry);
                 }
-                me.push_log(entry);
             }
         });
 
@@ -568,20 +569,38 @@ fn create_kill_on_close_job() -> Option<win32job::Job> {
     Some(job)
 }
 
-pub(crate) fn parse_log_line(line: &str) -> LogLine {
-    #[derive(serde::Deserialize)]
-    struct Raw {
-        #[serde(default)]
-        time: String,
-        #[serde(default)]
-        level: String,
-        #[serde(default)]
-        msg: String,
-    }
-    let mut entry = match serde_json::from_str::<Raw>(line) {
-        Ok(r) => LogLine { time: r.time, level: r.level, msg: clean_error(&r.msg) },
-        Err(_) => LogLine { time: String::new(), level: "info".into(), msg: clean_error(line) },
+#[derive(serde::Deserialize)]
+struct RawLog {
+    #[serde(default)]
+    time: String,
+    #[serde(default)]
+    level: String,
+    #[serde(default)]
+    msg: String,
+}
+
+/// Converte uma linha de stderr do rclone em entradas de log. O bisync, quando roda via RC,
+/// embrulha os próprios logs num único evento cujo `msg` são várias linhas JSON; essas
+/// linhas internas viram entradas separadas, com o nível e o horário originais.
+pub(crate) fn parse_log_lines(line: &str) -> Vec<LogLine> {
+    let Ok(outer) = serde_json::from_str::<RawLog>(line) else {
+        return vec![finish_entry(LogLine { time: String::new(), level: "info".into(), msg: clean_error(line) })];
     };
+    let inner: Vec<&str> = outer.msg.lines().filter(|l| !l.trim().is_empty()).collect();
+    if inner.first().is_some_and(|l| l.trim_start().starts_with('{')) {
+        return inner
+            .into_iter()
+            .map(|l| match serde_json::from_str::<RawLog>(l) {
+                Ok(r) => LogLine { time: r.time, level: r.level, msg: clean_error(&r.msg) },
+                Err(_) => LogLine { time: outer.time.clone(), level: outer.level.clone(), msg: clean_error(l) },
+            })
+            .map(finish_entry)
+            .collect();
+    }
+    vec![finish_entry(LogLine { time: outer.time, level: outer.level, msg: clean_error(&outer.msg) })]
+}
+
+fn finish_entry(mut entry: LogLine) -> LogLine {
     // O rclone registra o usuário do RC em claro; ele não deve chegar à UI nem ao log.
     if entry.msg.starts_with("Using --user") {
         entry.msg = "Autenticação do RC ativa (credenciais efêmeras)".into();
@@ -603,7 +622,7 @@ mod tests {
     #[test]
     fn parses_port_from_json_log() {
         let line = r#"{"time":"2026-10-13T10:06:17-03:00","level":"notice","msg":"Serving remote control on http://127.0.0.1:59879/","source":"rcserver/rcserver.go:151"}"#;
-        let entry = parse_log_line(line);
+        let entry = parse_log_lines(line).remove(0);
         assert_eq!(entry.level, "notice");
         assert_eq!(parse_port(&entry.msg), Some(59879));
     }
@@ -611,13 +630,28 @@ mod tests {
     #[test]
     fn ignores_other_lines() {
         assert_eq!(parse_port("Using --user u1 --pass XXXX as authenticated user"), None);
-        let entry = parse_log_line("texto solto\n");
+        let entry = parse_log_lines("texto solto\n").remove(0);
         assert_eq!(entry.msg, "texto solto");
     }
 
     #[test]
     fn redacts_rc_user() {
         let line = r#"{"level":"info","msg":"Using --user dce14d7e52ad --pass XXXX as authenticated user"}"#;
-        assert!(!parse_log_line(line).msg.contains("dce14d7e52ad"));
+        assert!(!parse_log_lines(line)[0].msg.contains("dce14d7e52ad"));
+    }
+
+    #[test]
+    fn unwraps_bisync_nested_json() {
+        // Formato real do bisync via RC: um "notice" cujo msg são linhas JSON com cores ANSI.
+        let inner = [
+            r#"{"time":"t1","level":"info","msg":"\u001b[2mSetting x\u001b[0m"}"#,
+            r#"{"time":"t2","level":"error","msg":"falhou"}"#,
+        ]
+        .join("\n");
+        let line = serde_json::json!({ "time": "t0", "level": "notice", "msg": inner }).to_string();
+        let entries = parse_log_lines(&line);
+        assert_eq!(entries.len(), 2);
+        assert_eq!((entries[0].level.as_str(), entries[0].msg.as_str(), entries[0].time.as_str()), ("info", "Setting x", "t1"));
+        assert_eq!((entries[1].level.as_str(), entries[1].msg.as_str()), ("error", "falhou"));
     }
 }

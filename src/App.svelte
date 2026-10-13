@@ -9,16 +9,9 @@
   import Files from "./lib/components/views/Files.svelte";
   import Jobs from "./lib/components/views/Jobs.svelte";
   import Settings from "./lib/components/views/Settings.svelte";
-  import { app, type View } from "./lib/stores/app.svelte";
+  import { app } from "./lib/stores/app.svelte";
+  import { VIEWS } from "./lib/views";
 
-  const CRUMB: Record<View, string> = {
-    dashboard: "painel",
-    files: "arquivos",
-    jobs: "tarefas",
-    accounts: "contas",
-    settings: "config",
-  };
-  const ORDER: View[] = ["dashboard", "files", "jobs", "accounts", "settings"];
 
   // Durante um reinício o app continua navegável (dados podem estar defasados).
   const gated = $derived(!["ready", "restarting"].includes(app.daemon.state));
@@ -30,7 +23,7 @@
   function onkeydown(e: KeyboardEvent) {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && /^[1-5]$/.test(e.key)) {
       e.preventDefault();
-      app.view = ORDER[Number(e.key) - 1];
+      app.view = VIEWS[Number(e.key) - 1].id;
     }
   }
 </script>
@@ -41,8 +34,21 @@
   <header class="flex h-8 shrink-0 items-center gap-3 px-1">
     <HMark size={24} class="text-accent" />
     <span class="text-[16px] font-bold tracking-tight">hsync</span>
-    <span class="text-dim">/</span>
-    <span class="text-muted">{gated ? "rclone" : CRUMB[app.view]}</span>
+
+    <nav class="ml-auto flex items-center gap-1 text-[12.5px]" aria-label="Menu principal">
+      {#each VIEWS as v, i (v.id)}
+        <button
+          class="relative px-3 py-1 transition-colors {app.view === v.id ? 'text-fg' : 'text-muted hover:text-fg'}"
+          onclick={() => (app.view = v.id)}
+          disabled={gated}
+          title="{v.summary} (Ctrl+{i + 1})"
+          aria-current={app.view === v.id ? "page" : undefined}
+        >
+          <span class={app.view === v.id ? "text-accent" : "text-dim"}>{i}:</span>{v.label}
+          {#if app.view === v.id}<span class="absolute right-3 -bottom-0.5 left-3 h-px bg-accent"></span>{/if}
+        </button>
+      {/each}
+    </nav>
   </header>
 
   <main class="flex min-h-0 flex-1 flex-col border border-line bg-frame/95 shadow-[0_20px_60px_rgb(0_0_0/0.35)]">

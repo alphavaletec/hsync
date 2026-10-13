@@ -75,7 +75,9 @@ select,
   outline-offset: 1px;
 }
 
-/* ---- componentes ---- */
+/* ---- componentes ----
+   Na camada components: utilitárias do Tailwind (absolute, h-6…) podem sobrescrevê-las. */
+@layer components {
 
 .sec-label {
   display: flex;
@@ -310,4 +312,5 @@ select.input {
   to {
     transform: rotate(360deg);
   }
+}
 }
