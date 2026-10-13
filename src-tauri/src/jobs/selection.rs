@@ -116,7 +116,14 @@ pub fn compile_rules(selections: &[Selection], target: ItemState) -> Option<Vec<
 }
 
 /// Monta a definição da tarefa gerenciada para uma direção.
-pub fn job_input(remote: &str, base: &str, state: ItemState, rules: Vec<String>, interval_minutes: u32) -> JobInput {
+pub fn job_input(
+    remote: &str,
+    base: &str,
+    state: ItemState,
+    rules: Vec<String>,
+    interval_minutes: u32,
+    on_change: bool,
+) -> JobInput {
     let cloud = format!("{remote}:");
     let (name, source, dest, mode) = match state {
         // Local como path1: no resync (modo "newer") o mais recente vence de qualquer lado.
@@ -131,7 +138,12 @@ pub fn job_input(remote: &str, base: &str, state: ItemState, rules: Vec<String>,
         dest,
         mode,
         filters: Filters { custom_rules: rules, ..Default::default() },
-        schedule: Schedule { enabled: interval_minutes > 0, interval_minutes },
+        schedule: Schedule {
+            enabled: interval_minutes > 0,
+            interval_minutes,
+            // ↓ offline só recebe da nuvem: alterações locais não disparam nada.
+            on_change: on_change && state != ItemState::Download,
+        },
     }
 }
 
@@ -195,13 +207,15 @@ mod tests {
 
     #[test]
     fn builds_jobs_per_direction() {
-        let j = job_input("mega", "C:\\HSync\\mega", ItemState::Download, vec!["+ /x/**".into(), "- **".into()], 30);
+        let j = job_input("mega", "C:\\HSync\\mega", ItemState::Download, vec!["+ /x/**".into(), "- **".into()], 30, true);
+        assert!(!j.schedule.on_change, "offline não observa a pasta local");
         assert_eq!(j.source, "mega:");
         assert_eq!(j.dest, "C:\\HSync\\mega");
         assert_eq!(j.mode, SyncMode::Sync);
         assert!(j.schedule.enabled);
         assert!(j.validate().is_ok());
-        let up = job_input("mega", "C:\\HSync\\mega", ItemState::Upload, vec!["+ /x/**".into()], 0);
+        let up = job_input("mega", "C:\\HSync\\mega", ItemState::Upload, vec!["+ /x/**".into()], 0, true);
+        assert!(up.schedule.on_change);
         assert_eq!(up.mode, SyncMode::Copy);
         assert!(!up.schedule.enabled);
     }

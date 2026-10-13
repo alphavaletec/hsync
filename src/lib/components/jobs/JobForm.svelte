@@ -4,7 +4,7 @@
   import type { Job, JobInput, SyncMode } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { toasts } from "../../stores/toasts.svelte";
-  import { MODE_HELP, MODE_LABEL, directionOf, formatInterval } from "../../utils/format";
+  import { MODE_HELP, MODE_LABEL, directionOf, formatInterval, isLocalPath } from "../../utils/format";
   import ChipsInput from "../ui/ChipsInput.svelte";
   import Modal from "../ui/Modal.svelte";
   import PathPicker from "./PathPicker.svelte";
@@ -29,7 +29,7 @@
     filters: init
       ? $state.snapshot(init.filters)
       : { excludeDirs: [], excludeExts: [], excludeHidden: true, customRules: [] },
-    schedule: init ? $state.snapshot(init.schedule) : { enabled: false, intervalMinutes: 60 },
+    schedule: init ? $state.snapshot(init.schedule) : { enabled: false, intervalMinutes: 60, onChange: false },
   });
   let customRulesText = $state((init?.filters.customRules ?? []).join("\n"));
   let simulateAfter = $state(!init);
@@ -38,6 +38,8 @@
   let showAdvanced = $state((init?.filters.customRules.length ?? 0) > 0);
 
   const direction = $derived(form.source && form.dest ? directionOf(form.source, form.dest) : null);
+  // "Na modificação" só faz sentido quando a pasta deste PC é origem dos dados (ou no bidirecional).
+  const watchable = $derived(isLocalPath(form.source) || (form.mode === "bisync" && isLocalPath(form.dest)));
 
   async function save() {
     saving = true;
@@ -163,6 +165,12 @@
           {/if}
         </select>
       </div>
+      {#if watchable}
+        <label class="mt-3 flex cursor-pointer items-center gap-2 text-[12px]">
+          <input type="checkbox" bind:checked={form.schedule.onChange} class="accent-[#5cb8e4]" />
+          na modificação: sincronizar logo após alterações na pasta deste PC
+        </label>
+      {/if}
       <p class="mt-1 text-[11px] text-dim">o HSync precisa estar aberto (pode ficar na bandeja) para executar no horário.</p>
     </div>
 

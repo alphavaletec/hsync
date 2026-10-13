@@ -1,18 +1,19 @@
 //! Execução de tarefas no rclone, monitoramento em tempo real (polling de `core/stats`)
 //! e agendamento por intervalo.
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use super::model::{now_ms, Endpoint, Job, JobInput, RunStatus, RunTotals, SyncMode};
-use super::selection::{compile_rules, job_input, managed_key, ItemState, JOB_STATES};
+use super::selection::{compile_rules, job_input, managed_key, ItemState, Selection, JOB_STATES};
 use super::store::Store;
+use super::watcher::{event_matches, watch_targets, WatchTarget};
 use crate::error::{AppError, AppResult};
 use crate::rclone::client::clean_error;
 use crate::rclone::types::{CoreStats, Transferring};
@@ -95,11 +96,35 @@ pub struct JobManager {
     paused: AtomicBool,
     /// Ids negativos para transferências avulsas (não persistidas como tarefa).
     next_adhoc: AtomicI64,
+    /// "Na modificação": observador das pastas locais e eventos aguardando o debounce.
+    watch: Mutex<WatchState>,
+    watch_tx: tokio::sync::mpsc::UnboundedSender<PathBuf>,
+    watch_rx: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<PathBuf>>>,
 }
+
+#[derive(Default)]
+struct WatchState {
+    watcher: Option<notify::RecommendedWatcher>,
+    roots: Vec<PathBuf>,
+    targets: Vec<WatchTarget>,
+    selections: HashMap<String, Vec<Selection>>,
+    /// job → (primeiro evento, último evento) ainda não sincronizados.
+    pending: HashMap<i64, (Instant, Instant)>,
+    /// Eventos até este instante são da própria sincronização (arquivos baixados) e são ignorados.
+    quiet_until: HashMap<i64, Instant>,
+}
+
+/// Espera após a última alteração antes de sincronizar (salvar um arquivo gera vários eventos).
+const WATCH_DEBOUNCE: Duration = Duration::from_secs(4);
+/// Mesmo com alterações contínuas, sincroniza no máximo a cada…
+const WATCH_MAX_DELAY: Duration = Duration::from_secs(60);
+/// Janela após cada execução em que eventos são atribuídos à própria sincronização.
+const WATCH_QUIET_AFTER_RUN: Duration = Duration::from_secs(5);
 
 impl JobManager {
     pub fn new(app: AppHandle, daemon: Arc<Daemon>, store: Arc<Store>, bisync_root: PathBuf) -> Arc<Self> {
         let paused = store.get_setting("schedules_paused").ok().flatten().as_deref() == Some("1");
+        let (watch_tx, watch_rx) = tokio::sync::mpsc::unbounded_channel();
         Arc::new(Self {
             app,
             daemon,
@@ -108,6 +133,9 @@ impl JobManager {
             active: Mutex::new(HashMap::new()),
             paused: AtomicBool::new(paused),
             next_adhoc: AtomicI64::new(-1),
+            watch: Mutex::new(WatchState::default()),
+            watch_tx,
+            watch_rx: Mutex::new(Some(watch_rx)),
         })
     }
 
@@ -116,6 +144,123 @@ impl JobManager {
         tauri::async_runtime::spawn(async move { me.monitor_loop().await });
         let me = self.clone();
         tauri::async_runtime::spawn(async move { me.scheduler_loop().await });
+        if let Some(rx) = self.watch_rx.lock().unwrap().take() {
+            let me = self.clone();
+            tauri::async_runtime::spawn(async move { me.watch_loop(rx).await });
+        }
+        self.refresh_watches();
+    }
+
+    /// Recalcula as pastas observadas a partir das tarefas com "na modificação".
+    /// Só recria o observador do SO quando o conjunto de pastas muda.
+    pub fn refresh_watches(&self) {
+        let Ok(jobs) = self.store.list_jobs() else { return };
+        let targets = watch_targets(&jobs);
+        let mut selections = HashMap::new();
+        for t in &targets {
+            if let Some((remote, _)) = &t.scope {
+                if !selections.contains_key(remote) {
+                    selections.insert(remote.clone(), self.store.list_selections(remote).unwrap_or_default());
+                }
+            }
+        }
+        let mut roots: Vec<PathBuf> = targets.iter().map(|t| t.root.clone()).collect();
+        roots.sort();
+        roots.dedup();
+
+        let mut st = self.watch.lock().unwrap();
+        st.targets = targets;
+        st.selections = selections;
+        if st.roots == roots && (st.watcher.is_some() || roots.is_empty()) {
+            return;
+        }
+        st.watcher = None;
+        st.roots = roots.clone();
+        if roots.is_empty() {
+            return;
+        }
+        let tx = self.watch_tx.clone();
+        let handler = move |res: notify::Result<notify::Event>| {
+            if let Ok(ev) = res {
+                if !matches!(ev.kind, notify::EventKind::Access(_)) {
+                    for p in ev.paths {
+                        let _ = tx.send(p);
+                    }
+                }
+            }
+        };
+        match notify::recommended_watcher(handler) {
+            Ok(mut w) => {
+                use notify::Watcher;
+                for root in &roots {
+                    if let Err(e) = w.watch(root, notify::RecursiveMode::Recursive) {
+                        log::warn!("não foi possível observar {}: {e}", root.display());
+                    }
+                }
+                st.watcher = Some(w);
+                log::info!("observando alterações em {} pasta(s)", roots.len());
+            }
+            Err(e) => log::warn!("observador de arquivos indisponível: {e}"),
+        }
+    }
+
+    async fn watch_loop(self: Arc<Self>, mut rx: tokio::sync::mpsc::UnboundedReceiver<PathBuf>) {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                Some(path) = rx.recv() => self.on_fs_event(&path),
+                _ = tick.tick() => self.flush_watch_pending().await,
+            }
+        }
+    }
+
+    fn on_fs_event(&self, path: &Path) {
+        if self.is_paused() {
+            return;
+        }
+        let now = Instant::now();
+        let active: Vec<i64> = self.active.lock().unwrap().keys().copied().collect();
+        let mut st = self.watch.lock().unwrap();
+        let hits: Vec<i64> = st
+            .targets
+            .iter()
+            .filter(|t| event_matches(t, path, &st.selections))
+            .map(|t| t.job_id)
+            .collect();
+        for id in hits {
+            // Eventos durante/logo após a execução vêm da própria sincronização.
+            let quiet = st.quiet_until.get(&id).is_some_and(|q| now < *q);
+            if active.contains(&id) || quiet {
+                continue;
+            }
+            st.pending.entry(id).and_modify(|e| e.1 = now).or_insert((now, now));
+        }
+    }
+
+    async fn flush_watch_pending(&self) {
+        let now = Instant::now();
+        let due: Vec<i64> = {
+            let mut st = self.watch.lock().unwrap();
+            let due: Vec<i64> = st
+                .pending
+                .iter()
+                .filter(|(_, (first, last))| now - *last >= WATCH_DEBOUNCE || now - *first >= WATCH_MAX_DELAY)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in &due {
+                st.pending.remove(id);
+            }
+            due
+        };
+        for id in due {
+            if self.is_running(id) || self.daemon.client().is_err() {
+                continue;
+            }
+            log::info!("alteração local detectada: sincronizando tarefa {id}");
+            if let Err(e) = self.start(id, RunOptions::default(), "change").await {
+                log::warn!("tarefa {id} (na modificação) não iniciou: {e}");
+            }
+        }
     }
 
     pub fn has_active(&self) -> bool {
@@ -318,7 +463,7 @@ impl JobManager {
 
     /// Recompila as tarefas gerenciadas da aba Arquivos para `remote` a partir das seleções.
     /// Devolve os ids das tarefas criadas ou alteradas.
-    pub fn apply_selection(&self, remote: &str, base: &str, interval_minutes: u32) -> AppResult<Vec<i64>> {
+    pub fn apply_selection(&self, remote: &str, base: &str, interval_minutes: u32, on_change: bool) -> AppResult<Vec<i64>> {
         let selections = self.store.list_selections(remote)?;
         let mut changed = Vec::new();
         for state in JOB_STATES {
@@ -331,7 +476,7 @@ impl JobManager {
                 }
                 (None, None) => {}
                 (Some(rules), Some(id)) => {
-                    let input = job_input(remote, base, state, rules, interval_minutes);
+                    let input = job_input(remote, base, state, rules, interval_minutes, on_change);
                     let old = self.store.get_job(id)?;
                     let rules_changed = old.filters.custom_rules != input.filters.custom_rules;
                     self.store.update_job(id, &input)?;
@@ -344,7 +489,7 @@ impl JobManager {
                     }
                 }
                 (Some(rules), None) => {
-                    let input = job_input(remote, base, state, rules, interval_minutes);
+                    let input = job_input(remote, base, state, rules, interval_minutes, on_change);
                     input.validate()?;
                     changed.push(self.store.insert_managed_job(&input, &key)?);
                 }
@@ -398,6 +543,11 @@ impl JobManager {
 
     fn finish(&self, run: ActiveRun, status: RunStatus, error: Option<String>, stats: CoreStats) {
         self.active.lock().unwrap().remove(&run.job_id);
+        self.watch
+            .lock()
+            .unwrap()
+            .quiet_until
+            .insert(run.job_id, Instant::now() + WATCH_QUIET_AFTER_RUN);
         let totals = RunTotals {
             bytes: stats.bytes,
             files: stats.transfers,
@@ -441,6 +591,7 @@ impl JobManager {
     }
 
     pub fn emit_jobs_changed(&self) {
+        self.refresh_watches();
         let _ = self.app.emit("jobs-changed", ());
     }
 
@@ -659,7 +810,7 @@ mod tests {
             dest: "gd:b".into(),
             mode: SyncMode::Copy,
             filters: Filters::default(),
-            schedule: Schedule { enabled, interval_minutes: interval },
+            schedule: Schedule { enabled, interval_minutes: interval, on_change: false },
             bisync_initialized: false,
             created_at: 0,
             updated_at: 1_000,

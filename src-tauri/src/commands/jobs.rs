@@ -26,6 +26,7 @@ pub async fn create_job(state: State<'_, AppState>, input: JobInput) -> AppResul
     let input = input.normalize();
     state.jobs.validate_input(&input, None).await?;
     let id = state.store.insert_job(&input)?;
+    state.jobs.emit_jobs_changed();
     find_job(&state, id)
 }
 
@@ -41,6 +42,7 @@ pub async fn update_job(state: State<'_, AppState>, id: i64, input: JobInput) ->
     }
     state.jobs.validate_input(&input, Some(id)).await?;
     state.store.update_job(id, &input)?;
+    state.jobs.emit_jobs_changed();
     find_job(&state, id)
 }
 
@@ -56,6 +58,7 @@ pub async fn delete_job(state: State<'_, AppState>, id: i64) -> AppResult<()> {
     }
     state.store.delete_job(id)?;
     state.jobs.remove_job_files(id);
+    state.jobs.emit_jobs_changed();
     Ok(())
 }
 

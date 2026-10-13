@@ -51,6 +51,8 @@ CREATE TABLE selections (
     state  TEXT    NOT NULL,
     PRIMARY KEY (remote, path)
 );
+"#, r#"
+ALTER TABLE jobs ADD COLUMN on_change INTEGER NOT NULL DEFAULT 0;
 "#];
 
 const RUNS_KEPT_PER_JOB: i64 = 200;
@@ -109,8 +111,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let now = now_ms();
         conn.execute(
-            "INSERT INTO jobs (name, source, dest, mode, filters, schedule_enabled, interval_minutes, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            "INSERT INTO jobs (name, source, dest, mode, filters, schedule_enabled, interval_minutes, created_at, updated_at, on_change)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
             params![
                 input.name,
                 input.source,
@@ -119,7 +121,8 @@ impl Store {
                 serde_json::to_string(&input.filters)?,
                 input.schedule.enabled,
                 input.schedule.interval_minutes,
-                now
+                now,
+                input.schedule.on_change
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -175,7 +178,7 @@ impl Store {
             [now_ms()],
         )?;
         tx.execute("UPDATE selections SET remote = ?2 WHERE remote = ?1", params![old, new])?;
-        for prefix in ["files.base.", "files.interval."] {
+        for prefix in ["files.base.", "files.interval.", "files.watch."] {
             tx.execute(
                 "UPDATE settings SET key = ?2 WHERE key = ?1",
                 params![format!("{prefix}{old}"), format!("{prefix}{new}")],
@@ -232,7 +235,7 @@ impl Store {
             "UPDATE jobs SET
                 bisync_initialized = CASE WHEN source = ?2 AND dest = ?3 AND mode = ?4 THEN bisync_initialized ELSE 0 END,
                 name = ?1, source = ?2, dest = ?3, mode = ?4, filters = ?5,
-                schedule_enabled = ?6, interval_minutes = ?7, updated_at = ?8
+                schedule_enabled = ?6, interval_minutes = ?7, updated_at = ?8, on_change = ?10
              WHERE id = ?9",
             params![
                 input.name,
@@ -243,7 +246,8 @@ impl Store {
                 input.schedule.enabled,
                 input.schedule.interval_minutes,
                 now_ms(),
-                id
+                id,
+                input.schedule.on_change
             ],
         )?;
         if n == 0 {
@@ -372,6 +376,7 @@ fn job_from_row(r: &Row) -> rusqlite::Result<Job> {
         schedule: Schedule {
             enabled: r.get("schedule_enabled")?,
             interval_minutes: r.get("interval_minutes")?,
+            on_change: r.get("on_change")?,
         },
         bisync_initialized: r.get("bisync_initialized")?,
         created_at: r.get("created_at")?,
@@ -413,7 +418,7 @@ mod tests {
             dest: "gd:Backup".into(),
             mode: SyncMode::Bisync,
             filters: Filters { exclude_hidden: true, ..Default::default() },
-            schedule: Schedule { enabled: true, interval_minutes: 30 },
+            schedule: Schedule { enabled: true, interval_minutes: 30, on_change: false },
         }
     }
 

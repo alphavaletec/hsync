@@ -28,6 +28,8 @@ export interface Filters {
 export interface Schedule {
   enabled: boolean;
   intervalMinutes: number;
+  /** "Na modificação": alterações na pasta local sincronizam em segundos. */
+  onChange: boolean;
 }
 
 export interface RunRecord {
@@ -215,6 +217,7 @@ export interface FilesConfig {
   base: string;
   baseIsDefault: boolean;
   intervalMinutes: number;
+  onChange: boolean;
   selections: Selection[];
   jobs: Job[];
 }

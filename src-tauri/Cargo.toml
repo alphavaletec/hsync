@@ -30,6 +30,8 @@ getrandom = "0.4"
 zeroize = "1"
 # "Liberar espaço" na aba Arquivos manda a cópia local para a Lixeira (recuperável).
 trash = "5"
+# Sincronização "na modificação": observa as pastas locais das tarefas.
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 thiserror = "2"
 log = "0.4"
 

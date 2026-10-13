@@ -134,6 +134,7 @@
 
       <div class="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-[11.5px] text-muted">
         <span>
+          {#if job.schedule.onChange}<span class="text-accent">na modificação</span> ·{/if}
           {#if job.schedule.enabled}
             a cada {formatInterval(job.schedule.intervalMinutes)}
             {#if job.nextRunAt}· próxima {formatRelative(job.nextRunAt, now)}{:else}· <span class="text-warn">pausado</span>{/if}

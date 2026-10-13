@@ -211,9 +211,14 @@
     if (c) config = c;
   }
 
-  async function changeInterval(minutes: number) {
+  /** Na modificação, a nuvem ainda é verificada periodicamente (o provedor não avisa o app). */
+  const CLOUD_CHECK_ON_CHANGE = 15;
+
+  async function changeInterval(value: string) {
     if (!remote) return;
-    const c = await app.act(() => api.setFilesInterval(remote!, minutes));
+    const onChange = value === "change";
+    const minutes = onChange ? CLOUD_CHECK_ON_CHANGE : Number(value);
+    const c = await app.act(() => api.setFilesInterval(remote!, minutes, onChange));
     if (c) config = c;
   }
 
@@ -273,12 +278,23 @@
         </button>
       </div>
 
-      <div class="sec-label mt-3">sincronizar a cada</div>
-      <select class="input h-7 text-[11.5px]" value={config.intervalMinutes} onchange={(e) => changeInterval(Number(e.currentTarget.value))}>
+      <div class="sec-label mt-3">sincronizar</div>
+      <select
+        class="input h-7 text-[11.5px]"
+        value={config.onChange ? "change" : String(config.intervalMinutes)}
+        onchange={(e) => changeInterval(e.currentTarget.value)}
+      >
+        <option value="change">na modificação</option>
         {#each INTERVALS as m (m)}
-          <option value={m}>{m === 0 ? "só manual" : formatInterval(m)}</option>
+          <option value={String(m)}>{m === 0 ? "só manual" : `a cada ${formatInterval(m)}`}</option>
         {/each}
       </select>
+      {#if config.onChange}
+        <p class="text-[11px] leading-snug text-dim">
+          alterações neste PC sincronizam em segundos; mudanças feitas na nuvem são verificadas a cada
+          {CLOUD_CHECK_ON_CHANGE} min.
+        </p>
+      {/if}
 
       <div class="sec-label mt-3">marcados</div>
       <div class="flex flex-col gap-1 text-[11.5px]">

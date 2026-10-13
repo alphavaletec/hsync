@@ -36,6 +36,8 @@ impl SyncMode {
 pub struct Schedule {
     pub enabled: bool,
     pub interval_minutes: u32,
+    /// "Na modificação": sincroniza logo após alterações na pasta local.
+    pub on_change: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

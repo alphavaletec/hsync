@@ -38,6 +38,8 @@ pub struct FilesConfig {
     pub base: String,
     pub base_is_default: bool,
     pub interval_minutes: u32,
+    /// "Na modificação": alterações na pasta local sincronizam na hora.
+    pub on_change: bool,
     pub selections: Vec<Selection>,
     pub jobs: Vec<Job>,
 }
@@ -54,6 +56,14 @@ pub(crate) fn base_key(remote: &str) -> String {
 }
 fn interval_key(remote: &str) -> String {
     format!("files.interval.{remote}")
+}
+
+fn watch_key(remote: &str) -> String {
+    format!("files.watch.{remote}")
+}
+
+fn watch_for(state: &AppState, remote: &str) -> AppResult<bool> {
+    Ok(state.store.get_setting(&watch_key(remote))?.as_deref() == Some("1"))
 }
 
 pub(crate) fn default_base(app: &AppHandle, remote: &str) -> AppResult<PathBuf> {
@@ -103,6 +113,7 @@ fn build_config(app: &AppHandle, state: &AppState, remote: &str) -> AppResult<Fi
         base,
         base_is_default,
         interval_minutes: interval_for(state, remote)?,
+        on_change: watch_for(state, remote)?,
         selections: state.store.list_selections(remote)?,
         jobs,
     })
@@ -112,7 +123,7 @@ fn build_config(app: &AppHandle, state: &AppState, remote: &str) -> AppResult<Fi
 async fn apply_and_run(app: &AppHandle, state: &AppState, remote: &str) -> AppResult<()> {
     let (base, _) = base_for(app, state, remote)?;
     let interval = interval_for(state, remote)?;
-    let changed = state.jobs.apply_selection(remote, &base, interval)?;
+    let changed = state.jobs.apply_selection(remote, &base, interval, watch_for(state, remote)?)?;
     for id in changed {
         if let Err(e) = state.jobs.start(id, RunOptions::default(), "selection").await {
             log::warn!("tarefa gerenciada {id} não iniciou: {e}");
@@ -406,14 +417,17 @@ pub async fn set_files_interval(
     state: State<'_, AppState>,
     remote: String,
     minutes: u32,
+    on_change: Option<bool>,
 ) -> AppResult<FilesConfig> {
     if minutes != 0 && !(MIN_INTERVAL_MINUTES..=MAX_INTERVAL_MINUTES).contains(&minutes) {
         return Err(AppError::invalid("Intervalo inválido"));
     }
+    let on_change = on_change.unwrap_or(false);
     ensure_idle(&state, &remote)?;
     state.store.set_setting(&interval_key(&remote), &minutes.to_string())?;
+    state.store.set_setting(&watch_key(&remote), if on_change { "1" } else { "0" })?;
     let (base, _) = base_for(&app, &state, &remote)?;
-    state.jobs.apply_selection(&remote, &base, minutes)?;
+    state.jobs.apply_selection(&remote, &base, minutes, on_change)?;
     build_config(&app, &state, &remote)
 }
 
