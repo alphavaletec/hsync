@@ -13,6 +13,15 @@
     "dialog:allow-message",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://rclone.org/*" },
+        { "url": "https://console.cloud.google.com/*" },
+        { "url": "https://portal.azure.com/*" },
+        { "url": "http://127.0.0.1:53682/*" }
+      ]
+    }
   ]
 }

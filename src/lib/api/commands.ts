@@ -1,0 +1,66 @@
+// Wrappers tipados dos comandos Tauri. O frontend nunca fala com o rclone diretamente.
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  ConfigStep,
+  DaemonStatus,
+  DirEntry,
+  Job,
+  JobInput,
+  JobProgress,
+  LogLine,
+  OAuthProgress,
+  Provider,
+  Remote,
+  RemoteTest,
+  RunOptions,
+  RunRecord,
+  Settings,
+} from "./types";
+
+export const api = {
+  // daemon / configurações
+  daemonStatus: () => invoke<DaemonStatus>("daemon_status"),
+  daemonLogs: () => invoke<LogLine[]>("daemon_logs"),
+  daemonRetry: () => invoke<void>("daemon_retry"),
+  unlockConfig: (password: string) => invoke<void>("unlock_config", { password }),
+  getSettings: () => invoke<Settings>("get_settings"),
+  setBwlimit: (rate: string) => invoke<string>("set_bwlimit", { rate }),
+  setMasterPassword: (current: string | null, next: string) =>
+    invoke<void>("set_master_password", { current, new: next }),
+  removeMasterPassword: (current: string) => invoke<void>("remove_master_password", { current }),
+  quitApp: () => invoke<void>("quit_app"),
+
+  // contas
+  listRemotes: () => invoke<Remote[]>("list_remotes"),
+  listProviders: () => invoke<Provider[]>("list_providers"),
+  createRemote: (name: string, kind: string, parameters: Record<string, string>) =>
+    invoke<ConfigStep>("create_remote", { input: { name, kind, parameters } }),
+  answerConfig: (name: string, kind: string, configState: string, result: string) =>
+    invoke<ConfigStep>("answer_config", { name, kind, configState, result }),
+  oauthProgress: (name: string, kind: string, jobId: number) =>
+    invoke<OAuthProgress>("oauth_progress", { name, kind, jobId }),
+  cancelRemoteConfig: (name: string) => invoke<void>("cancel_remote_config", { name }),
+  testRemote: (name: string) => invoke<RemoteTest>("test_remote", { name }),
+  deleteRemote: (name: string) => invoke<void>("delete_remote", { name }),
+  listRemoteDirs: (remote: string, path: string) => invoke<DirEntry[]>("list_remote_dirs", { remote, path }),
+  makeRemoteDir: (remote: string, path: string) => invoke<void>("make_remote_dir", { remote, path }),
+
+  // tarefas
+  listJobs: () => invoke<Job[]>("list_jobs"),
+  createJob: (input: JobInput) => invoke<Job>("create_job", { input }),
+  updateJob: (id: number, input: JobInput) => invoke<Job>("update_job", { id, input }),
+  deleteJob: (id: number) => invoke<void>("delete_job", { id }),
+  runJob: (id: number, options?: RunOptions) => invoke<number>("run_job", { id, options }),
+  stopJob: (id: number) => invoke<void>("stop_job", { id }),
+  runAllJobs: () => invoke<void>("run_all_jobs"),
+  listRuns: (jobId?: number, limit?: number) => invoke<RunRecord[]>("list_runs", { jobId, limit }),
+  getProgress: () => invoke<JobProgress[]>("get_progress"),
+  setSchedulesPaused: (paused: boolean) => invoke<void>("set_schedules_paused", { paused }),
+};
+
+/** Erros dos comandos chegam como string (ver `impl Serialize for AppError`). */
+export function errorMessage(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
