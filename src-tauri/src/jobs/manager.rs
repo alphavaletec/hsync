@@ -30,6 +30,8 @@ pub struct RunOptions {
     pub dry_run: bool,
     /// Bisync: força `--resync` (recria o estado a partir dos dois lados).
     pub resync: bool,
+    /// Bisync: ignora a trava de segurança de exclusões em massa (`--force`).
+    pub force: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +183,7 @@ impl JobManager {
         let group = group_name(job_id);
         let resync = job.mode == SyncMode::Bisync && (opts.resync || !job.bisync_initialized);
 
-        let (path, params) = self.build_call(&job, opts.dry_run, resync)?;
+        let (path, params) = self.build_call(&job, opts.dry_run, resync, opts.force)?;
 
         let run_id = {
             let mut active = self.active.lock().unwrap();
@@ -365,7 +367,7 @@ impl JobManager {
 
     // ------------------------------------------------------------------
 
-    fn build_call(&self, job: &Job, dry_run: bool, resync: bool) -> AppResult<(&'static str, Value)> {
+    fn build_call(&self, job: &Job, dry_run: bool, resync: bool, force: bool) -> AppResult<(&'static str, Value)> {
         let group = group_name(job.id);
         let rules = job.filters.to_rules();
         let mut params = match job.mode {
@@ -379,18 +381,7 @@ impl JobManager {
                 let workdir = self.bisync_root.join(job.id.to_string());
                 std::fs::create_dir_all(&workdir)?;
                 remove_stale_locks(&workdir);
-                json!({
-                    "path1": job.source,
-                    "path2": job.dest,
-                    "workdir": workdir.to_string_lossy(),
-                    "resync": resync,
-                    // Na ressincronização o arquivo mais recente vence, de qualquer lado.
-                    "resyncMode": "newer",
-                    "recover": true,
-                    "resilient": true,
-                    "createEmptySrcDirs": true,
-                    "dryRun": dry_run,
-                })
+                bisync_params(&job.source, &job.dest, &workdir, resync, dry_run, force)
             }
         };
         params["_group"] = json!(group);
@@ -416,7 +407,11 @@ impl JobManager {
         let mut error = error.map(|e| clean_error(&e)).filter(|e| !e.is_empty());
         if run.mode == SyncMode::Bisync && status == RunStatus::Failed {
             if let Some(e) = error.as_mut() {
-                if e.contains("--resync") {
+                if e.contains("too many deletes") {
+                    *e = "Interrompido por segurança: mais da metade dos arquivos seriam apagados de um dos lados. \
+                          Se foi intencional, use \"forçar exclusões\" na tarefa."
+                        .into();
+                } else if e.contains("--resync") {
                     e.push_str("\n\nUse \"Ressincronizar\" para recriar o estado do bidirecional.");
                 }
             }
@@ -545,6 +540,38 @@ impl JobManager {
             }
         }
     }
+}
+
+/// Parâmetros de `sync/bisync` (sem `_group`/`_filter`). Usado pelo app e pelos testes de integração.
+pub(crate) fn bisync_params(
+    path1: &str,
+    path2: &str,
+    workdir: &std::path::Path,
+    resync: bool,
+    dry_run: bool,
+    force: bool,
+) -> Value {
+    let mut p = json!({
+        "path1": path1,
+        "path2": path2,
+        "workdir": workdir.to_string_lossy(),
+        "resync": resync,
+        "recover": true,
+        "resilient": true,
+        "createEmptySrcDirs": true,
+        "dryRun": dry_run,
+        // Via RC as opções não herdam os padrões do CLI: sem isto o limite seria 0% e
+        // qualquer exclusão (inclusive renomear) abortaria com "too many deletes".
+        "maxDelete": 50,
+        "force": force,
+    });
+    // resyncMode IMPLICA --resync no rclone: só pode ir junto de uma ressincronização,
+    // senão toda execução vira resync (que nunca propaga exclusões nem renomeações).
+    if resync {
+        // Na ressincronização o arquivo mais recente vence, de qualquer lado.
+        p["resyncMode"] = json!("newer");
+    }
+    p
 }
 
 fn group_name(job_id: i64) -> String {

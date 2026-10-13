@@ -149,9 +149,12 @@ async fn sync_copy_bisync_against_real_rclone() {
     // --- bisync: resync inicial e depois propagação nos dois sentidos ---
     write(&bsrc.join("um.txt"), "1");
     std::fs::create_dir_all(&bdst).unwrap();
+    // Os mesmos parâmetros que o app usa (evita o teste divergir do código real).
+    use crate::jobs::manager::bisync_params;
     let bis = |resync: bool| {
-        json!({ "path1": s(&bsrc), "path2": s(&bdst), "workdir": s(&work), "resync": resync,
-                "recover": true, "resilient": true, "_group": "t4" })
+        let mut p = bisync_params(&s(&bsrc), &s(&bdst), &work, resync, false, false);
+        p["_group"] = json!("t4");
+        p
     };
     assert!(wait_job(&client, client.call_async("sync/bisync", bis(true)).await.unwrap()).await.success);
     assert!(bdst.join("um.txt").exists());
@@ -175,9 +178,10 @@ async fn sync_copy_bisync_against_real_rclone() {
     ];
     let sync_rules = compile_rules(&sels, ItemState::Sync).unwrap();
     let bis_sel = |resync: bool| {
-        json!({ "path1": s(&local), "path2": s(&cloud), "workdir": s(&work2), "resync": resync,
-                "resyncMode": "newer", "recover": true, "resilient": true, "_group": "t5",
-                "_filter": { "FilterRule": sync_rules } })
+        let mut p = bisync_params(&s(&local), &s(&cloud), &work2, resync, false, false);
+        p["_group"] = json!("t5");
+        p["_filter"] = json!({ "FilterRule": sync_rules });
+        p
     };
     std::fs::create_dir_all(&local).unwrap();
     let st = wait_job(&client, client.call_async("sync/bisync", bis_sel(true)).await.unwrap()).await;
@@ -191,6 +195,14 @@ async fn sync_copy_bisync_against_real_rclone() {
     assert!(cloud.join("Fotos/nova.jpg").exists(), "mudança local sobe");
     assert!(cloud.join("Fotos/RAW/big.raw").exists(), "ignorado não é apagado na nuvem");
 
+    // Renomear localmente vira renomear na nuvem (sobe o novo, remove o antigo), sem duplicar.
+    std::fs::rename(local.join("Fotos/a.jpg"), local.join("Fotos/a-renomeado.jpg")).unwrap();
+    let st = wait_job(&client, client.call_async("sync/bisync", bis_sel(false)).await.unwrap()).await;
+    assert!(st.success, "bisync após renomear: {}", st.error);
+    assert!(cloud.join("Fotos/a-renomeado.jpg").exists(), "nome novo sobe");
+    assert!(!cloud.join("Fotos/a.jpg").exists(), "nome antigo sai da nuvem");
+    assert!(!local.join("Fotos/a.jpg").exists(), "nome antigo não volta para o PC");
+
     let down_rules = compile_rules(&sels, ItemState::Download).unwrap();
     let jobid = client
         .call_async(
@@ -202,7 +214,7 @@ async fn sync_copy_bisync_against_real_rclone() {
     let st = wait_job(&client, jobid).await;
     assert!(st.success, "download seletivo: {}", st.error);
     assert!(local.join("Docs/x.pdf").exists(), "arquivo marcado como offline desce");
-    assert!(local.join("Fotos/a.jpg").exists(), "espelho filtrado não apaga o que está fora do filtro");
+    assert!(local.join("Fotos/a-renomeado.jpg").exists(), "espelho filtrado não apaga o que está fora do filtro");
 
     // --- "liberar espaço": a cópia local só sai se tudo nela existir igual na nuvem ---
     use crate::commands::files::{local_copy_in_cloud, LocalVsCloud};
