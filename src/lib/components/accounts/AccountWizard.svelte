@@ -1,6 +1,7 @@
 <script lang="ts">
   // Wizard de nova conta: provedor → dados → (perguntas / OAuth no navegador) → teste de conexão.
-  import { Cloud, ExternalLink, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import { ExternalLink, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import ProviderLogo from "../ui/ProviderLogo.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onDestroy } from "svelte";
   import { api, errorMessage } from "../../api/commands";
@@ -180,7 +181,7 @@
       {#each FEATURED as f (f.kind)}
         <button class="node px-4 py-4 text-left hover:border-accent" onclick={() => choose(f.kind, f.name)}>
           <span class="node-dot"></span>
-          <Cloud size={18} class="text-accent" />
+          <ProviderLogo kind={f.kind} size={22} />
           <div class="mt-2 font-semibold">{providerLabel(f.kind)}</div>
           <div class="text-[11px] text-muted">{f.hint}</div>
         </button>

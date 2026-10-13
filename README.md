@@ -95,3 +95,10 @@ Para distribuição, assine o `HSync.exe` e o instalador. O SmartScreen e alguns
 - **Limite de banda:** é global (`core/bwlimit`). O rclone não aplica limite por tarefa via RC.
 - **Agendamento:** só roda com o HSync aberto (na bandeja). A opção "iniciar com o sistema" abre o app minimizado.
 - **Pré-visualização:** o arquivo vai para um cache privado (`<app_local_data>/preview`), que é limpo a cada sessão. É o único diretório exposto ao webview pelo asset protocol. Links dentro de documentos não navegam, e "abrir no aplicativo" é validado no Rust: só arquivos do cache e só tipos de documento ou mídia (nunca executáveis). Formatos antigos (.doc, .ppt) não têm renderizador local.
+
+## Créditos
+
+- Logos dos provedores: [Simple Icons](https://simpleicons.org) (CC0), embutidos no app. As marcas pertencem aos seus
+  respectivos donos e são usadas só para identificar o serviço de cada conta. O OneDrive aparece como uma nuvem no azul
+  da marca, já que a Microsoft não permite a distribuição do logo pelo Simple Icons.
+- Ícones da interface: [Lucide](https://lucide.dev) (ISC).

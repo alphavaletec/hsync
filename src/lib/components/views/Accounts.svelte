@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Activity, Cloud, KeyRound, LoaderCircle, Pencil, Plus, Trash2 } from "@lucide/svelte";
+  import { Activity, KeyRound, LoaderCircle, Pencil, Plus, Trash2 } from "@lucide/svelte";
+  import ProviderLogo from "../ui/ProviderLogo.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage } from "../../api/commands";
   import type { Remote, RemoteTest } from "../../api/types";
@@ -107,7 +108,7 @@
       <article class="node flex flex-col px-4 py-4">
         <span class="node-dot"></span>
         <div class="flex items-center gap-3">
-          <Cloud size={20} class="text-accent" />
+          <ProviderLogo kind={r.kind} size={22} />
           <div class="min-w-0">
             <div class="truncate text-[14px] font-semibold">{r.name}:</div>
             <div class="text-[11px] text-muted">{providerLabel(r.kind)}</div>

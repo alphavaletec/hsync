@@ -2,6 +2,7 @@
   // Mapa de sincronização: pastas locais (esquerda) → motor rclone (centro) → contas (direita).
   // Cada tarefa é uma ligação; tarefas em execução animam o sentido dos dados.
   import { Cloud, Eye, HardDrive } from "@lucide/svelte";
+  import ProviderLogo from "../ui/ProviderLogo.svelte";
   import type { Job, JobProgress } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { MODE_LABEL, STATUS_LABEL, formatSpeed, isLocalPath, providerLabel, remoteOf } from "../../utils/format";
@@ -16,6 +17,8 @@
     sub: string;
     path?: string;
     missing?: boolean;
+    /** Tipo do remote (logo do provedor). */
+    provider?: string;
   }
   interface Placed extends MapNode {
     x: number;
@@ -67,7 +70,7 @@
   const nodes = $derived.by(() => {
     const map = new Map<string, MapNode>();
     for (const r of app.remotes) {
-      map.set(`r:${r.name}`, { id: `r:${r.name}`, side: "right", kind: "remote", label: r.name, sub: providerLabel(r.kind) });
+      map.set(`r:${r.name}`, { id: `r:${r.name}`, side: "right", kind: "remote", label: r.name, sub: providerLabel(r.kind), provider: r.kind });
     }
     for (const j of app.jobs) {
       for (const p of [j.source, j.dest]) {
@@ -297,8 +300,10 @@
       <div class="flex min-w-0 items-center gap-2">
         {#if n.kind === "local"}
           <HardDrive size={15} class="shrink-0 {act ? 'text-accent' : 'text-muted'}" />
+        {:else if n.provider}
+          <ProviderLogo kind={n.provider} size={15} />
         {:else}
-          <Cloud size={15} class="shrink-0 {act ? 'text-accent' : n.missing ? 'text-warn' : 'text-muted'}" />
+          <Cloud size={15} class="shrink-0 {n.missing ? 'text-warn' : 'text-muted'}" />
         {/if}
         <span class="truncate text-[12.5px] font-semibold">{n.kind === "remote" ? `${n.label}:` : n.label}</span>
         {#if watchedNodes.has(n.id) && !act}

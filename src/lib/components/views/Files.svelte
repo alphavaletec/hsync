@@ -25,6 +25,7 @@
   import { toasts } from "../../stores/toasts.svelte";
   import { ITEM_STATE, STATUS_COLOR, STATUS_LABEL, formatBytes, formatDateTime, formatInterval, providerLabel } from "../../utils/format";
   import PreviewModal from "../files/PreviewModal.svelte";
+  import ProviderLogo from "../ui/ProviderLogo.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   const STATES: ItemState[] = ["sync", "download", "upload", "ignore"];
@@ -300,7 +301,7 @@
           : 'border-transparent text-muted hover:bg-node'}"
         onclick={() => ((remote = r.name), (path = ""))}
       >
-        <Cloud size={14} class={remote === r.name ? "text-accent" : ""} />
+        <ProviderLogo kind={r.kind} size={14} class={remote === r.name ? "" : "opacity-70"} />
         <span class="truncate">{r.name}</span>
         <span class="ml-auto text-[10.5px] text-dim">{providerLabel(r.kind)}</span>
       </button>
