@@ -57,6 +57,15 @@
     return c;
   });
 
+  // As contas podem chegar depois da aba abrir, ou a conta escolhida pode ter sido removida.
+  $effect(() => {
+    const names = app.remotes.map((r) => r.name);
+    if (names.length > 0 && (remote === null || !names.includes(remote))) {
+      remote = names[0] ?? null;
+      path = "";
+    }
+  });
+
   $effect(() => {
     app.filesRemote = remote;
   });
