@@ -60,6 +60,7 @@ pub fn run() {
             // Diretório curto: o bisync monta nomes de arquivo com os dois caminhos (MAX_PATH no Windows).
             let jobs = JobManager::new(app.handle().clone(), daemon.clone(), store.clone(), local_dir.join("bs"));
 
+            commands::preview::clear_preview_cache(app.handle());
             tray::create(app.handle(), jobs.is_paused())?;
             app.manage(AppState {
                 daemon: daemon.clone(),
@@ -114,6 +115,8 @@ pub fn run() {
             commands::files::sync_account_now,
             commands::files::download_items,
             commands::files::upload_items,
+            commands::preview::preview_file,
+            commands::preview::open_preview_external,
             commands::jobs::list_jobs,
             commands::jobs::create_job,
             commands::jobs::update_job,

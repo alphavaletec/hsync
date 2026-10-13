@@ -12,6 +12,7 @@ import type {
   JobProgress,
   LogLine,
   OAuthProgress,
+  Preview,
   Provider,
   Remote,
   RemoteTest,
@@ -61,6 +62,10 @@ export const api = {
     invoke<number>("download_items", { remote, items, target }),
   uploadItems: (remote: string, dir: string, localPaths: string[]) =>
     invoke<number>("upload_items", { remote, dir, localPaths }),
+
+  previewFile: (remote: string, path: string, size: number, modTime: string | null) =>
+    invoke<Preview>("preview_file", { remote, path, size, modTime }),
+  openPreviewExternal: (localPath: string) => invoke<void>("open_preview_external", { localPath }),
 
   // tarefas
   listJobs: () => invoke<Job[]>("list_jobs"),

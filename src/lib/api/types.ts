@@ -213,3 +213,16 @@ export interface FilesConfig {
   selections: Selection[];
   jobs: Job[];
 }
+
+export type PreviewKind = "image" | "pdf" | "text" | "audio" | "video" | "other";
+
+export interface Preview {
+  kind: PreviewKind;
+  name: string;
+  localPath: string;
+  size: number;
+  text: string | null;
+  truncated: boolean;
+  canOpenExternal: boolean;
+  fromLocalCopy: boolean;
+}

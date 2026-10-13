@@ -5,6 +5,7 @@
     ArrowUp,
     Cloud,
     Download,
+    Eye,
     File,
     Folder,
     FolderOpen,
@@ -23,6 +24,7 @@
   import { app } from "../../stores/app.svelte";
   import { toasts } from "../../stores/toasts.svelte";
   import { ITEM_STATE, STATUS_COLOR, STATUS_LABEL, formatBytes, formatDateTime, formatInterval, providerLabel } from "../../utils/format";
+  import PreviewModal from "../files/PreviewModal.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   const STATES: ItemState[] = ["sync", "download", "upload", "ignore"];
@@ -37,9 +39,17 @@
   let selected = $state<Set<string>>(new Set());
   let busyPath = $state<string | null>(null);
   let newFolder = $state<string | null>(null);
+  /** Índice em `fileEntries` do arquivo em pré-visualização. */
+  let previewIndex = $state<number | null>(null);
 
   const crumbs = $derived(path ? path.split("/") : []);
   const selectedEntries = $derived(entries.filter((e) => selected.has(e.path)));
+  const fileEntries = $derived(entries.filter((e) => !e.isDir));
+
+  function openPreview(e: FileEntry) {
+    const i = fileEntries.indexOf(e);
+    if (i >= 0) previewIndex = i;
+  }
   const managedIds = $derived(new Set(config?.jobs.map((j) => j.id) ?? []));
   const counts = $derived.by(() => {
     const c: Record<ItemState, number> = { sync: 0, download: 0, upload: 0, ignore: 0 };
@@ -318,7 +328,10 @@
                     <button class="truncate text-left hover:underline" onclick={() => (path = e.path)} title={e.name}>{e.name}</button>
                   {:else}
                     <File size={14} class="shrink-0 text-muted" />
-                    <span class="selectable truncate" title={e.name}>{e.name}</span>
+                    <button class="truncate text-left hover:underline" ondblclick={() => openPreview(e)} title="{e.name} — duplo clique para pré-visualizar">{e.name}</button>
+                    <button class="btn btn-ghost btn-icon ml-auto h-6 w-6 shrink-0" onclick={() => openPreview(e)} title="Pré-visualizar" aria-label="Pré-visualizar {e.name}">
+                      <Eye size={13} />
+                    </button>
                   {/if}
                 </span>
                 <span class="text-right text-[11.5px] text-muted">{e.isDir ? "" : formatBytes(e.size)}</span>
@@ -361,3 +374,7 @@
     {/if}
   </section>
 </div>
+
+{#if previewIndex !== null && remote && fileEntries.length}
+  <PreviewModal {remote} files={fileEntries} bind:index={previewIndex} onclose={() => (previewIndex = null)} />
+{/if}

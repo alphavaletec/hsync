@@ -63,7 +63,7 @@ fn default_base(app: &AppHandle, remote: &str) -> AppResult<PathBuf> {
     Ok(home.join("HSync").join(safe.trim()))
 }
 
-fn base_for(app: &AppHandle, state: &AppState, remote: &str) -> AppResult<(String, bool)> {
+pub(crate) fn base_for(app: &AppHandle, state: &AppState, remote: &str) -> AppResult<(String, bool)> {
     match state.store.get_setting(&base_key(remote))? {
         Some(b) => Ok((b, false)),
         None => Ok((default_base(app, remote)?.to_string_lossy().into_owned(), true)),
@@ -78,7 +78,7 @@ fn interval_for(state: &AppState, remote: &str) -> AppResult<u32> {
         .unwrap_or(DEFAULT_INTERVAL))
 }
 
-async fn ensure_remote(state: &AppState, remote: &str) -> AppResult<()> {
+pub(crate) async fn ensure_remote(state: &AppState, remote: &str) -> AppResult<()> {
     let client = state.daemon.client()?;
     if client.list_remotes().await?.iter().any(|r| r == remote) {
         Ok(())
