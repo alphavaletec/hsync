@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, Cloud, LoaderCircle, Plus, Trash2 } from "@lucide/svelte";
+  import { Activity, Cloud, KeyRound, LoaderCircle, Plus, Trash2 } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage } from "../../api/commands";
   import type { Remote, RemoteTest } from "../../api/types";
@@ -9,6 +9,11 @@
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   let wizard = $state(false);
+  let reauth = $state<{ name: string; kind: string } | null>(null);
+
+  // Provedores que fazem login pelo navegador (OAuth) e por isso podem ter o login renovado.
+  const OAUTH_KINDS = new Set(["drive", "onedrive", "dropbox", "box", "pcloud", "gphotos", "yandex", "zoho", "hidrive", "jottacloud", "sharefile", "putio", "premiumizeme", "pikpak"]);
+  const looksLikeAuthError = (msg: string | null) => !!msg && /token|oauth|unauthori[sz]ed|401|invalid_grant|expired|consent/i.test(msg);
   let tests = $state<Record<string, RemoteTest | "loading">>({});
 
   const usage = (name: string) => app.jobs.filter((j) => remoteOf(j.source) === name || remoteOf(j.dest) === name).length;
@@ -98,6 +103,15 @@
 
         <div class="mt-4 flex gap-2">
           <button class="btn" onclick={() => testRemote(r)} disabled={t === "loading"}><Activity size={13} /> testar</button>
+          {#if OAUTH_KINDS.has(r.kind)}
+            <button
+              class="btn {t && t !== 'loading' && !t.ok && looksLikeAuthError(t.error) ? 'border-warn text-warn' : ''}"
+              onclick={() => (reauth = { name: r.name, kind: r.kind })}
+              title="Renova o login no navegador (token expirado ou acesso revogado)"
+            >
+              <KeyRound size={13} /> reautorizar
+            </button>
+          {/if}
           <button class="btn btn-icon btn-danger ml-auto" onclick={() => remove(r)} title="Remover"><Trash2 size={14} /></button>
         </div>
       </article>
@@ -107,4 +121,17 @@
 
 {#if wizard}
   <AccountWizard onclose={() => ((wizard = false), app.refreshRemotes())} />
+{/if}
+{#if reauth}
+  {#key reauth.name}
+    <AccountWizard
+      {reauth}
+      onclose={() => {
+        const name = reauth?.name;
+        reauth = null;
+        if (name) delete tests[name];
+        void app.refreshRemotes();
+      }}
+    />
+  {/key}
 {/if}

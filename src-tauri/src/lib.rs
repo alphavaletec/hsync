@@ -6,7 +6,7 @@ mod secret;
 mod state;
 mod tray;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -66,7 +66,7 @@ pub fn run() {
                 daemon: daemon.clone(),
                 jobs: jobs.clone(),
                 store,
-                pending_remotes: Mutex::new(HashSet::new()),
+                pending_remotes: Mutex::new(HashMap::new()),
             });
 
             daemon.start();
@@ -103,6 +103,7 @@ pub fn run() {
             commands::accounts::answer_config,
             commands::accounts::oauth_progress,
             commands::accounts::cancel_remote_config,
+            commands::accounts::reauthorize_remote,
             commands::accounts::test_remote,
             commands::accounts::delete_remote,
             commands::accounts::list_remote_dirs,

@@ -10,9 +10,10 @@
   import Modal from "../ui/Modal.svelte";
   import ConfigQuestion from "./ConfigQuestion.svelte";
 
-  let { onclose }: { onclose: () => void } = $props();
+  // Com `reauth`, o wizard só renova o login de uma conta existente (pula provedor/dados).
+  let { onclose, reauth = null }: { onclose: () => void; reauth?: { name: string; kind: string } | null } = $props();
 
-  type Phase = "provider" | "details" | "question" | "oauth" | "testing" | "done" | "error";
+  type Phase = "provider" | "details" | "starting" | "question" | "oauth" | "testing" | "done" | "error";
 
   const FEATURED = [
     { kind: "drive", name: "gdrive", hint: "OAuth no navegador" },
@@ -30,10 +31,13 @@
     mega: ["user", "pass"],
   };
 
-  let phase = $state<Phase>("provider");
+  // svelte-ignore state_referenced_locally
+  let phase = $state<Phase>(reauth ? "starting" : "provider");
   let providers = $state<Provider[]>([]);
-  let kind = $state("");
-  let name = $state("");
+  // svelte-ignore state_referenced_locally
+  let kind = $state(reauth?.kind ?? "");
+  // svelte-ignore state_referenced_locally
+  let name = $state(reauth?.name ?? "");
   let params = $state<Record<string, string>>({});
   let otherKind = $state("");
   let busy = $state(false);
@@ -55,6 +59,15 @@
   );
 
   $effect(() => {
+    if (!reauth) return;
+    api
+      .reauthorizeRemote(reauth.name, reauth.kind)
+      .then(handle)
+      .catch((e) => fail(errorMessage(e)));
+  });
+
+  $effect(() => {
+    if (reauth) return;
     api.listProviders().then((p) => (providers = p)).catch((e) => (error = errorMessage(e)));
   });
 
@@ -147,7 +160,7 @@
   }
 </script>
 
-<Modal title="conectar conta" width="640px" onclose={cancel}>
+<Modal title={reauth ? `reautorizar — ${reauth.name}:` : "conectar conta"} width="640px" onclose={cancel}>
   {#if phase === "provider"}
     <div class="sec-label mb-3">provedor</div>
     <div class="grid grid-cols-3 gap-4 px-2">
@@ -271,6 +284,10 @@
         <button class="btn" onclick={() => openUrl(authUrl!)}><ExternalLink size={14} /> abrir de novo no navegador</button>
       {/if}
     </div>
+  {:else if phase === "starting"}
+    <div class="flex items-center justify-center gap-3 py-10 text-muted">
+      <LoaderCircle size={18} class="spin" /> preparando a renovação do login de {name}:…
+    </div>
   {:else if phase === "testing"}
     <div class="flex items-center justify-center gap-3 py-10 text-muted">
       <LoaderCircle size={18} class="spin" /> testando conexão com {name}:…
@@ -278,7 +295,7 @@
   {:else if phase === "done"}
     <div class="flex flex-col gap-3 py-2">
       {#if test?.ok}
-        <h3 class="text-[16px] font-semibold"><span class="text-ok">◆</span> {name}: conectada</h3>
+        <h3 class="text-[16px] font-semibold"><span class="text-ok">◆</span> {name}: {reauth ? "login renovado" : "conectada"}</h3>
         {#if test.about?.total}
           <p class="text-[12px] text-muted">
             espaço: {formatBytes(test.about.used ?? 0)} usados de {formatBytes(test.about.total)}
@@ -293,7 +310,8 @@
     </div>
   {:else if phase === "error"}
     <div class="py-4">
-      <h3 class="text-[16px] font-semibold"><span class="text-err">✕</span> não foi possível conectar</h3>
+      <h3 class="text-[16px] font-semibold"><span class="text-err">✕</span> {reauth ? "não foi possível reautorizar" : "não foi possível conectar"}</h3>
+      {#if reauth}<p class="mt-2 text-[12px] text-muted">a conta continua configurada como estava.</p>{/if}
       <p class="selectable mt-2 text-[12px] text-err">{error}</p>
     </div>
   {/if}
@@ -309,7 +327,9 @@
       <button class="btn btn-primary" onclick={onclose}>pronto</button>
     {:else if phase === "error"}
       <button class="btn" onclick={onclose}>fechar</button>
-      <button class="btn btn-primary" onclick={() => ((phase = "details"), (error = null))}>tentar de novo</button>
+      {#if !reauth}
+        <button class="btn btn-primary" onclick={() => ((phase = "details"), (error = null))}>tentar de novo</button>
+      {/if}
     {:else}
       <button class="btn" onclick={cancel}>cancelar</button>
     {/if}

@@ -8,7 +8,7 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 use crate::rclone::client::clean_error;
 use crate::rclone::RcClient;
-use crate::state::AppState;
+use crate::state::{AppState, PendingKind};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,7 +119,15 @@ async fn ensure_remote(client: &RcClient, name: &str) -> AppResult<()> {
 pub async fn list_remotes(state: State<'_, AppState>) -> AppResult<Vec<Remote>> {
     let client = state.daemon.client()?;
     let dump = client.config_dump().await?;
-    let pending = state.pending_remotes.lock().unwrap().clone();
+    // Contas novas ainda não concluídas ficam ocultas; as em reautorização continuam visíveis.
+    let pending: Vec<String> = state
+        .pending_remotes
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, k)| **k == PendingKind::Create)
+        .map(|(n, _)| n.clone())
+        .collect();
     let mut remotes: Vec<Remote> = dump
         .as_object()
         .map(|m| {
@@ -185,6 +193,7 @@ pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<Provide
 /// Interpreta a resposta da máquina de estados de `config/create`, respondendo
 /// automaticamente as perguntas que o app já resolve sozinho.
 async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mut res: Value) -> AppResult<ConfigStep> {
+    let mode = pending_kind(state, name).unwrap_or(PendingKind::Create);
     for _ in 0..20 {
         let out = RcClient::parse_config_output(res.clone())?;
         if out.state.is_empty() {
@@ -196,12 +205,13 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
         match opt_name {
             // Fluxo OAuth com servidor local do próprio rclone (redirect para 127.0.0.1:53682).
             "config_is_local" => {
-                let job_id = client.call_async("config/create", continue_params(name, kind, &out.state, "true")).await?;
+                let job_id = client.call_async(mode.rc_path(), continue_params(mode, name, kind, &out.state, "true")).await?;
                 return Ok(ConfigStep::OAuth { job_id });
             }
             // O wizard já avisou sobre o client_id compartilhado do Google estar sendo descontinuado.
-            "config_shared_client_id" => {
-                res = client.call("config/create", continue_params(name, kind, &out.state, "true")).await?;
+            // Reautorização: "já existe um token, renovar?" — é exatamente o que foi pedido.
+            "config_shared_client_id" | "config_refresh_token" => {
+                res = client.call(mode.rc_path(), continue_params(mode, name, kind, &out.state, "true")).await?;
             }
             _ => {
                 let error = Some(clean_error(&out.error)).filter(|e| !e.is_empty());
@@ -212,19 +222,29 @@ async fn advance(state: &AppState, client: &RcClient, name: &str, kind: &str, mu
     Err(AppError::invalid("O assistente de configuração do rclone não convergiu"))
 }
 
-fn continue_params(name: &str, kind: &str, st: &str, result: &str) -> Value {
-    json!({
+fn continue_params(mode: PendingKind, name: &str, kind: &str, st: &str, result: &str) -> Value {
+    let mut params = json!({
         "name": name,
-        "type": kind,
         "parameters": {},
         "opt": { "nonInteractive": true, "obscure": true, "continue": true, "state": st, "result": result },
-    })
+    });
+    if mode == PendingKind::Create {
+        params["type"] = json!(kind);
+    }
+    params
+}
+
+fn pending_kind(state: &AppState, name: &str) -> Option<PendingKind> {
+    state.pending_remotes.lock().unwrap().get(name).copied()
 }
 
 async fn abort_pending(state: &AppState, client: &RcClient, name: &str) {
-    let was_pending = state.pending_remotes.lock().unwrap().remove(name);
-    if was_pending {
+    let removed = state.pending_remotes.lock().unwrap().remove(name);
+    if removed.is_some() {
         let _ = client.oauth_stop().await;
+    }
+    // Só uma conta nova (ainda incompleta) é apagada; numa reautorização a conta fica como estava.
+    if removed == Some(PendingKind::Create) {
         let _ = client.config_delete(name).await;
     }
 }
@@ -244,7 +264,7 @@ pub async fn create_remote(state: State<'_, AppState>, input: CreateRemoteInput)
         .filter(|(_, v)| !v.is_empty())
         .collect();
 
-    state.pending_remotes.lock().unwrap().insert(name.clone());
+    state.pending_remotes.lock().unwrap().insert(name.clone(), PendingKind::Create);
     let res = client
         .call(
             "config/create",
@@ -274,11 +294,10 @@ pub async fn answer_config(
     config_state: String,
     result: String,
 ) -> AppResult<ConfigStep> {
-    if !state.pending_remotes.lock().unwrap().contains(&name) {
-        return Err(AppError::invalid("Nenhuma configuração em andamento para esta conta"));
-    }
+    let mode = pending_kind(&state, &name)
+        .ok_or_else(|| AppError::invalid("Nenhuma configuração em andamento para esta conta"))?;
     let client = state.daemon.client()?;
-    let res = client.call("config/create", continue_params(&name, &kind, &config_state, &result)).await;
+    let res = client.call(mode.rc_path(), continue_params(mode, &name, &kind, &config_state, &result)).await;
     let step = match res {
         Ok(res) => advance(&state, &client, &name, &kind, res).await,
         Err(e) => Err(e),
@@ -312,6 +331,34 @@ pub async fn oauth_progress(state: State<'_, AppState>, name: String, kind: Stri
             Ok(OAuthProgress { finished: true, auth_url: None, next: None, error: Some(e.to_string()) })
         }
     }
+}
+
+/// Renova o login (OAuth) de uma conta existente, ex.: token expirado ou acesso revogado.
+#[tauri::command]
+pub async fn reauthorize_remote(state: State<'_, AppState>, name: String, kind: String) -> AppResult<ConfigStep> {
+    let client = state.daemon.client()?;
+    ensure_remote(&client, &name).await?;
+    if pending_kind(&state, &name).is_some() {
+        return Err(AppError::invalid("Já existe uma configuração em andamento para esta conta"));
+    }
+    state.pending_remotes.lock().unwrap().insert(name.clone(), PendingKind::Reauth);
+    let res = client
+        .call("config/update", json!({ "name": name, "parameters": {}, "opt": { "nonInteractive": true, "obscure": true } }))
+        .await;
+    let step = match res {
+        Ok(res) if RcClient::parse_config_output(res.clone()).is_ok_and(|o| o.state.is_empty()) => {
+            state.pending_remotes.lock().unwrap().remove(&name);
+            return Err(AppError::invalid(
+                "Esta conta não usa autorização pelo navegador. Para trocar usuário ou senha, remova e conecte de novo.",
+            ));
+        }
+        Ok(res) => advance(&state, &client, &name, &kind, res).await,
+        Err(e) => Err(e),
+    };
+    if step.is_err() {
+        abort_pending(&state, &client, &name).await;
+    }
+    step
 }
 
 #[tauri::command]

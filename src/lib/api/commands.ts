@@ -44,6 +44,7 @@ export const api = {
   oauthProgress: (name: string, kind: string, jobId: number) =>
     invoke<OAuthProgress>("oauth_progress", { name, kind, jobId }),
   cancelRemoteConfig: (name: string) => invoke<void>("cancel_remote_config", { name }),
+  reauthorizeRemote: (name: string, kind: string) => invoke<ConfigStep>("reauthorize_remote", { name, kind }),
   testRemote: (name: string) => invoke<RemoteTest>("test_remote", { name }),
   deleteRemote: (name: string) => invoke<void>("delete_remote", { name }),
   listRemoteDirs: (remote: string, path: string) => invoke<DirEntry[]>("list_remote_dirs", { remote, path }),
