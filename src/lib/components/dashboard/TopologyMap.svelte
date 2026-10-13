@@ -1,7 +1,7 @@
 <script lang="ts">
   // Mapa de sincronização: pastas locais (esquerda) → motor rclone (centro) → contas (direita).
   // Cada tarefa é uma ligação; tarefas em execução animam o sentido dos dados.
-  import { Cloud, HardDrive } from "@lucide/svelte";
+  import { Cloud, Eye, HardDrive } from "@lucide/svelte";
   import type { Job, JobProgress } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { MODE_LABEL, STATUS_LABEL, formatSpeed, isLocalPath, providerLabel, remoteOf } from "../../utils/format";
@@ -32,6 +32,10 @@
     progress?: JobProgress;
     segs: Seg[];
     state: "running" | "failed" | "idle" | "paused";
+    /** Acabou de concluir com sucesso (brilho verde por alguns segundos). */
+    done: boolean;
+    /** Ociosa, mas agendada/observando: pulso lento de "conectado". */
+    alive: boolean;
   }
 
   const NODE_H = 58;
@@ -158,9 +162,28 @@
           segs.push({ id, d: ortho(hub.x + HUB_W + PIN, hy, n.x - PIN, ny), forward: !isSource });
         }
       }
-      return { job: e.job, progress: e.progress, state: e.state, segs };
+      const finished = app.recentlyFinished[e.job.id];
+      return {
+        job: e.job,
+        progress: e.progress,
+        state: e.state,
+        segs,
+        done: !e.progress && finished?.status === "success",
+        // Ligação "viva": agendada ou na modificação, sem pausa — pulso discreto em repouso.
+        alive: e.state === "idle" && !paused && (e.job.schedule.enabled || e.job.schedule.onChange),
+      };
     });
   });
+
+  // Pastas locais observadas ("na modificação").
+  const watchedNodes = $derived(
+    new Set(
+      app.jobs
+        .filter((j) => j.schedule.onChange)
+        .flatMap((j) => [j.source, j.dest].filter(isLocalPath).map(endpointId)),
+    ),
+  );
+  const anyAlive = $derived(edges.some((e) => e.alive));
 
   const activeByNode = $derived.by(() => {
     const m = new Map<string, { speed: number; count: number }>();
@@ -199,8 +222,8 @@
 
 <div class="relative" bind:clientWidth={width} style:height="{height}px">
   <svg class="absolute inset-0 overflow-visible" width={width} height={height} aria-hidden="true">
-    {#each edges as e (e.job.id)}
-      {#each e.segs as s (s.id)}
+    {#each edges as e, ei (e.job.id)}
+      {#each e.segs as s, si (s.id)}
         <path id={s.id} d={s.d} fill="none" stroke={STROKE[e.state]} stroke-width={hovered === e.job.id ? 2.5 : 1.75}
           stroke-dasharray={e.state === "failed" ? "3 4" : e.state === "paused" ? "2 5" : undefined}
           class:flow-fwd={e.state === "running" && !reduceMotion && s.forward}
@@ -221,6 +244,22 @@
             </rect>
           {/if}
         {/if}
+        {#if e.done && !reduceMotion}
+          <!-- Conclusão: brilho verde que se apaga (execuções rápidas também ficam visíveis). -->
+          <path d={s.d} fill="none" stroke="#3fcf8e" stroke-width="2.5" class="done-flash" />
+        {/if}
+        {#if e.alive && !reduceMotion}
+          <!-- Pulso de repouso: um ponto discreto percorre a ligação no sentido dos dados. -->
+          <!-- Ciclo de 9 s: percorre a linha nos primeiros ~2,6 s e fica invisível no resto. -->
+          <circle r="2.2" fill="#5cb8e4" opacity="0">
+            <animateMotion dur="9s" begin="{(ei * 1.7 + si * 2.6) % 9}s" repeatCount="indefinite"
+              keyPoints={s.forward ? "0;1;1" : "1;0;0"} keyTimes="0;0.29;1" calcMode="linear">
+              <mpath href="#{s.id}" />
+            </animateMotion>
+            <animate attributeName="opacity" values="0;0.75;0.75;0;0" keyTimes="0;0.04;0.25;0.29;1" dur="9s"
+              begin="{(ei * 1.7 + si * 2.6) % 9}s" repeatCount="indefinite" />
+          </circle>
+        {/if}
         <!-- Área de hover mais larga que a linha visível. -->
         <path d={s.d} fill="none" stroke="transparent" stroke-width="12" class="cursor-pointer"
           role="presentation" onmouseenter={() => (hovered = e.job.id)} onmouseleave={() => (hovered = null)}>
@@ -232,6 +271,7 @@
 
   <!-- motor -->
   <div class="node absolute flex flex-col justify-center px-4" class:hub-active={running.size > 0 && !reduceMotion}
+    class:hub-idle={running.size === 0 && anyAlive && !reduceMotion}
     style:left="{hub.x}px" style:top="{hub.y}px" style:width="{HUB_W}px" style:height="{HUB_H}px">
     <span class="node-dot" class:bg-accent={running.size > 0}></span>
     <div class="flex items-center gap-3">
@@ -261,6 +301,11 @@
           <Cloud size={15} class="shrink-0 {act ? 'text-accent' : n.missing ? 'text-warn' : 'text-muted'}" />
         {/if}
         <span class="truncate text-[12.5px] font-semibold">{n.kind === "remote" ? `${n.label}:` : n.label}</span>
+        {#if watchedNodes.has(n.id) && !act}
+          <span title="Na modificação: alterações nesta pasta sincronizam em segundos">
+            <Eye size={12} class="shrink-0 text-accent {reduceMotion ? '' : 'watching'}" />
+          </span>
+        {/if}
         {#if failedNodes.has(n.id) && !act}<span class="ml-auto text-[11px] text-err" title="Última execução falhou">✕</span>{/if}
       </div>
       <div class="mt-0.5 truncate text-[11px] text-muted">
@@ -346,6 +391,48 @@
       box-shadow: 0 0 0 1px rgb(92 184 228 / 0.55), 0 0 26px rgb(92 184 228 / 0.22);
     }
   }
+  /* Em repouso, com ligações ativas: respiração bem mais lenta e fraca. */
+  .hub-idle {
+    animation: breathe-idle 5s ease-in-out infinite;
+  }
+  @keyframes breathe-idle {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px rgb(92 184 228 / 0.06);
+    }
+    50% {
+      box-shadow: 0 0 0 1px rgb(92 184 228 / 0.22), 0 0 14px rgb(92 184 228 / 0.07);
+    }
+  }
+  /* Conclusão: a ligação acende em verde e se apaga. */
+  .done-flash {
+    animation: done-flash 3.2s ease-out forwards;
+    filter: drop-shadow(0 0 4px rgb(63 207 142 / 0.7));
+  }
+  @keyframes done-flash {
+    0% {
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  /* Pasta observada: o olho "pisca" devagar. */
+  :global(.watching) {
+    animation: watching 3.2s ease-in-out infinite;
+  }
+  @keyframes watching {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
   .live {
     animation: live 1.6s ease-in-out infinite;
   }
@@ -358,7 +445,10 @@
     .flow-fwd,
     .flow-rev,
     .hub-active,
-    .live {
+    .hub-idle,
+    .done-flash,
+    .live,
+    :global(.watching) {
       animation: none;
     }
   }

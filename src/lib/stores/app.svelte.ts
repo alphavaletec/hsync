@@ -18,6 +18,8 @@ class AppStore {
   remotes = $state<Remote[]>([]);
   runs = $state<RunRecord[]>([]);
   progress = $state<JobProgress[]>([]);
+  /** Execuções recém-terminadas (jobId → status e instante), para efeitos visuais de conclusão. */
+  recentlyFinished = $state<Record<number, { status: string; at: number }>>({});
   /** Velocidade agregada (bytes/s), uma amostra por segundo. */
   speedHistory = $state<number[]>([]);
   logs = $state<LogLine[]>([]);
@@ -47,6 +49,11 @@ class AppStore {
         this.pushSpeed(p.reduce((a, x) => a + x.speed, 0));
       }),
       on("job-finished", (f) => {
+        this.recentlyFinished = { ...this.recentlyFinished, [f.jobId]: { status: f.status, at: Date.now() } };
+        setTimeout(() => {
+          const { [f.jobId]: _, ...rest } = this.recentlyFinished;
+          this.recentlyFinished = rest;
+        }, 3500);
         const what = f.dryRun ? `Simulação de "${f.jobName}"` : `"${f.jobName}"`;
         if (f.status === "success") toasts.push("ok", `${what} concluída`);
         else if (f.status === "cancelled") toasts.push("info", `${what} cancelada`);
