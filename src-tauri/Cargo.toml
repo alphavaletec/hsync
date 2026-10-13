@@ -28,6 +28,8 @@ reqwest = { version = "0.13", default-features = false, features = ["json"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 getrandom = "0.4"
 zeroize = "1"
+# "Liberar espaço" na aba Arquivos manda a cópia local para a Lixeira (recuperável).
+trash = "5"
 thiserror = "2"
 log = "0.4"
 

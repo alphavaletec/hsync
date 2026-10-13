@@ -204,6 +204,26 @@ async fn sync_copy_bisync_against_real_rclone() {
     assert!(local.join("Docs/x.pdf").exists(), "arquivo marcado como offline desce");
     assert!(local.join("Fotos/a.jpg").exists(), "espelho filtrado não apaga o que está fora do filtro");
 
+    // --- "liberar espaço": a cópia local só sai se tudo nela existir igual na nuvem ---
+    use crate::commands::files::{local_copy_in_cloud, LocalVsCloud};
+    let (lc, cc) = (root.join("lc"), root.join("cc"));
+    write(&lc.join("Pasta/a.txt"), "a");
+    write(&cc.join("Pasta/a.txt"), "a");
+    write(&cc.join("Pasta/so-nuvem.txt"), "n");
+    write(&lc.join("doc.pdf"), "pdf");
+    write(&cc.join("doc.pdf"), "pdf");
+    write(&lc.join("mudou.txt"), "novo conteúdo");
+    write(&cc.join("mudou.txt"), "antigo");
+    let same_dir = local_copy_in_cloud(&client, &lc.join("Pasta"), &s(&cc.join("Pasta")), true).await.unwrap();
+    assert_eq!(same_dir, LocalVsCloud::Same, "pasta igual (a nuvem pode ter a mais)");
+    write(&lc.join("Pasta/so-local.txt"), "x");
+    let only_local = local_copy_in_cloud(&client, &lc.join("Pasta"), &s(&cc.join("Pasta")), true).await.unwrap();
+    assert_eq!(only_local, LocalVsCloud::Different { only_local: 1, differ: 0 });
+    let same_file = local_copy_in_cloud(&client, &lc.join("doc.pdf"), &s(&cc), false).await.unwrap();
+    assert_eq!(same_file, LocalVsCloud::Same, "arquivo igual; os vizinhos diferentes não contam");
+    let changed = local_copy_in_cloud(&client, &lc.join("mudou.txt"), &s(&cc), false).await.unwrap();
+    assert_eq!(changed, LocalVsCloud::Different { only_local: 0, differ: 1 });
+
     // --- erro limpo para remote inexistente ---
     let err = client.fsinfo("naoexiste:").await.unwrap_err().to_string();
     assert!(!err.contains('\u{1b}'));

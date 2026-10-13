@@ -117,6 +117,7 @@ pub fn run() {
             commands::files::sync_account_now,
             commands::files::download_items,
             commands::files::upload_items,
+            commands::files::free_space,
             commands::preview::preview_file,
             commands::preview::open_preview_external,
             commands::jobs::list_jobs,

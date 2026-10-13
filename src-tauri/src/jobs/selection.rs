@@ -72,6 +72,20 @@ pub fn normalize_path(p: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
+/// Estado efetivo de um caminho: o próprio ou o da pasta ancestral marcada mais próxima.
+pub fn effective_state(selections: &[Selection], path: &str) -> Option<ItemState> {
+    selections
+        .iter()
+        .filter(|s| s.path == path || (s.is_dir && path.starts_with(&format!("{}/", s.path))))
+        .max_by_key(|s| s.path.len())
+        .map(|s| s.state)
+}
+
+/// Mantém uma cópia local do item (⇄ e ↓ baixam; ↑ e ⊘ não)?
+pub fn keeps_local_copy(state: Option<ItemState>) -> bool {
+    matches!(state, Some(ItemState::Sync | ItemState::Download))
+}
+
 fn pattern(sel: &Selection) -> String {
     let escaped: Vec<String> = sel.path.split('/').map(escape_glob).collect();
     let base = format!("/{}", escaped.join("/"));
@@ -146,6 +160,22 @@ mod tests {
         assert_eq!(down[0], "+ /Fotos/2024/capa.jpg");
         assert_eq!(down.last().unwrap(), "- **");
         assert!(compile_rules(&s, ItemState::Upload).is_none());
+    }
+
+    #[test]
+    fn effective_state_inherits_from_nearest_folder() {
+        let s = vec![
+            sel("Fotos", true, ItemState::Download),
+            sel("Fotos/RAW", true, ItemState::Ignore),
+            sel("Fotos/capa.jpg", false, ItemState::Sync),
+        ];
+        assert_eq!(effective_state(&s, "Fotos"), Some(ItemState::Download));
+        assert_eq!(effective_state(&s, "Fotos/2024/a.jpg"), Some(ItemState::Download));
+        assert_eq!(effective_state(&s, "Fotos/RAW/x.raw"), Some(ItemState::Ignore));
+        assert_eq!(effective_state(&s, "Fotos/capa.jpg"), Some(ItemState::Sync));
+        assert_eq!(effective_state(&s, "Fotoss/a.jpg"), None, "prefixo de nome não é ancestral");
+        assert_eq!(effective_state(&s, "Docs"), None);
+        assert!(keeps_local_copy(Some(ItemState::Download)) && !keeps_local_copy(Some(ItemState::Upload)));
     }
 
     #[test]

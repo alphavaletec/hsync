@@ -15,7 +15,7 @@
     RefreshCw,
     Upload,
   } from "@lucide/svelte";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { ask, open } from "@tauri-apps/plugin-dialog";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { onDestroy } from "svelte";
   import { api, errorMessage } from "../../api/commands";
@@ -45,6 +45,9 @@
   const crumbs = $derived(path ? path.split("/") : []);
   const selectedEntries = $derived(entries.filter((e) => selected.has(e.path)));
   const fileEntries = $derived(entries.filter((e) => !e.isDir));
+  /** Alguma tarefa desta conta está rodando agora? (itens marcados aparecem como "baixando"). */
+  const accountSyncing = $derived(app.progress.some((p) => managedIds.has(p.jobId)));
+  const keepsLocal = (s: ItemState | undefined) => s === "sync" || s === "download";
 
   function openPreview(e: FileEntry) {
     const i = fileEntries.indexOf(e);
@@ -126,10 +129,13 @@
     const st = (value || null) as ItemState | null;
     busyPath = e.path;
     try {
-      config = await api.setItemState(remote, e.path, e.isDir, st);
-      if (st === "download" || st === "sync") {
-        toasts.push("ok", `${e.name}: ${ITEM_STATE[st].label} em ${config.base}`);
-      }
+      const r = remote;
+      const res = await api.setItemState(r, e.path, e.isDir, st);
+      config = res.config;
+      if (res.notice) toasts.push(res.notice.startsWith("Mantive") ? "info" : "ok", res.notice, 9000);
+      else if (st === "download" || st === "sync") toasts.push("ok", `${e.name}: ${ITEM_STATE[st].label} em ${config.base}`);
+      // Reflete na hora a coluna "onde" (cópia local liberada ou mantida).
+      await load(r, path, true);
     } catch (err) {
       toasts.push("err", errorMessage(err));
     } finally {
@@ -142,6 +148,32 @@
     if (next.has(p)) next.delete(p);
     else next.add(p);
     selected = next;
+  }
+
+  /** Selecionados com cópia local liberável: estão nos dois lados e não são ⇄/↓/↑. */
+  const freeable = $derived(
+    selectedEntries.filter((e) => e.inCloud && e.local && !keepsLocal(effective(e.path)?.state) && effective(e.path)?.state !== "upload"),
+  );
+  let freeing = $state(false);
+
+  async function freeSelected() {
+    if (!remote || freeable.length === 0) return;
+    const ok = await ask(
+      `Liberar o espaço de ${freeable.length} item(ns)? A cópia local vai para a Lixeira; os arquivos continuam na nuvem. Nada que exista só neste PC é removido.`,
+      { title: "Liberar espaço", kind: "warning", okLabel: "Liberar", cancelLabel: "Cancelar" },
+    );
+    if (!ok) return;
+    const r = remote;
+    freeing = true;
+    try {
+      const notices = await api.freeSpace(r, freeable.map((e) => ({ path: e.path, isDir: e.isDir })));
+      for (const n of notices) toasts.push(n.startsWith("Cópia local") ? "ok" : "info", n, 9000);
+      await load(r, path, true);
+    } catch (err) {
+      toasts.push("err", errorMessage(err));
+    } finally {
+      freeing = false;
+    }
   }
 
   async function downloadSelected() {
@@ -293,6 +325,14 @@
         <button class="btn" onclick={() => (newFolder = "")}><FolderPlus size={14} /> pasta</button>
         <button class="btn" onclick={() => upload(false)}><Upload size={14} /> enviar arquivos</button>
         <button class="btn btn-icon" title="Enviar pastas" onclick={() => upload(true)}><FolderOpen size={14} /></button>
+        <button
+          class="btn"
+          onclick={freeSelected}
+          disabled={freeing || freeable.length === 0}
+          title="Remove a cópia local (vai para a Lixeira) dos selecionados que estão nos dois lados e não estão marcados para ficar offline"
+        >
+          <HardDrive size={14} /> liberar espaço{freeable.length ? ` (${freeable.length})` : ""}
+        </button>
         <button class="btn btn-primary" onclick={downloadSelected} disabled={selectedEntries.filter((e) => e.inCloud).length === 0}>
           <Download size={14} /> baixar ({selectedEntries.length})
         </button>
@@ -347,7 +387,9 @@
                 <span class="text-right text-[11.5px] text-muted">{e.isDir ? "" : formatBytes(e.size)}</span>
                 <span class="text-[11.5px] text-muted">{when(e)}</span>
                 <span class="flex items-center gap-1.5 text-[11px]">
-                  {#if e.inCloud && e.local}
+                  {#if accountSyncing && !e.local && e.inCloud && keepsLocal(eff?.state)}
+                    <LoaderCircle size={12} class="spin text-accent" /> <span class="text-accent">baixando…</span>
+                  {:else if e.inCloud && e.local}
                     <span class="text-ok" title="Na nuvem e em {localPathOf(e.path)}">◆</span> nos dois
                   {:else if e.inCloud}
                     <Cloud size={12} class="text-dim" /> <span class="text-dim">só nuvem</span>

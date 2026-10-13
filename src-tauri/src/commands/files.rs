@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::jobs::model::{Endpoint, Job, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES};
-use crate::jobs::selection::{normalize_path, ItemState, Selection};
+use crate::jobs::selection::{effective_state, keeps_local_copy, normalize_path, ItemState, Selection};
 use crate::jobs::RunOptions;
 use crate::rclone::filters::escape_glob;
 use crate::state::AppState;
@@ -230,13 +230,162 @@ pub async fn set_item_state(
     path: String,
     is_dir: bool,
     item_state: Option<ItemState>,
-) -> AppResult<FilesConfig> {
+) -> AppResult<SetStateResult> {
     ensure_remote(&state, &remote).await?;
     let path = normalize_path(&path).ok_or_else(|| AppError::invalid("Escolha um arquivo ou pasta (não a raiz)"))?;
-    ensure_idle(&state, &remote)?;
+    // A mudança vale na hora: uma sincronização em andamento desta conta é interrompida
+    // (ela é refeita em seguida com a nova seleção).
+    stop_account_jobs(&state, &remote).await?;
+
+    let before = effective_state(&state.store.list_selections(&remote)?, &path);
     state.store.set_selection(&remote, &path, is_dir, item_state)?;
+    let after = effective_state(&state.store.list_selections(&remote)?, &path);
+
+    // Deixou de ter cópia local (ex.: "manter offline" → "nenhum"): libera o espaço.
+    // Não vale para ↑ só enviar (os arquivos locais são os originais) nem para ⊘ ignorar
+    // (o usuário só quer tirar o item da sincronização).
+    let notice = if keeps_local_copy(before) && after.is_none() {
+        free_local_copy(&app, &state, &remote, &path, is_dir).await?
+    } else {
+        None
+    };
+
     apply_and_run(&app, &state, &remote).await?;
-    build_config(&app, &state, &remote)
+    Ok(SetStateResult { config: build_config(&app, &state, &remote)?, notice })
+}
+
+/// "Liberar espaço": manda para a Lixeira a cópia local dos itens escolhidos que não estão
+/// marcados para ficar offline (com as mesmas garantias de `free_local_copy`).
+#[tauri::command]
+pub async fn free_space(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    remote: String,
+    items: Vec<ItemRef>,
+) -> AppResult<Vec<String>> {
+    ensure_remote(&state, &remote).await?;
+    let selections = state.store.list_selections(&remote)?;
+    let mut notices = Vec::new();
+    for it in items {
+        let Some(rel) = normalize_path(&it.path) else { continue };
+        let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
+        let current = effective_state(&selections, &rel);
+        if keeps_local_copy(current) {
+            notices.push(format!(
+                "\"{name}\" está marcado para ficar neste PC; mude o estado para \"nenhum\" para liberar o espaço."
+            ));
+            continue;
+        }
+        if current == Some(ItemState::Upload) {
+            notices.push(format!("\"{name}\" é \"só enviar\": os arquivos locais são os originais e não são removidos."));
+            continue;
+        }
+        if let Some(n) = free_local_copy(&app, &state, &remote, &rel, it.is_dir).await? {
+            notices.push(n);
+        }
+    }
+    Ok(notices)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetStateResult {
+    pub config: FilesConfig,
+    /// Mensagem sobre a cópia local (liberada ou mantida e por quê).
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum LocalVsCloud {
+    Same,
+    Different { only_local: usize, differ: usize },
+}
+
+/// Tudo que existe em `local` (arquivo ou pasta) também existe, igual, na nuvem?
+/// `cloud_fs` é a pasta na nuvem correspondente à pasta `local` ou, para arquivo, à pasta-mãe dele.
+pub(crate) async fn local_copy_in_cloud(
+    client: &crate::rclone::RcClient,
+    local: &Path,
+    cloud_fs: &str,
+    is_dir: bool,
+) -> AppResult<LocalVsCloud> {
+    // operations/check não aceita arquivo como raiz: para arquivo, compara a pasta-mãe
+    // filtrando só aquele nome.
+    let params = if is_dir {
+        json!({ "srcFs": local.to_string_lossy(), "dstFs": cloud_fs, "oneWay": true })
+    } else {
+        let name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        json!({
+            "srcFs": local.parent().unwrap_or(local).to_string_lossy(),
+            "dstFs": cloud_fs,
+            "oneWay": true,
+            "_filter": { "FilterRule": [format!("+ /{}", escape_glob(&name)), "- **"] },
+        })
+    };
+    let report = client.call_timeout("operations/check", params, Some(Duration::from_secs(600))).await?;
+    if report.get("success").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(LocalVsCloud::Same);
+    }
+    let count = |k: &str| report.get(k).and_then(Value::as_array).map_or(0, Vec::len);
+    Ok(LocalVsCloud::Different { only_local: count("missingOnDst"), differ: count("differ") })
+}
+
+/// Interrompe as tarefas gerenciadas da conta e espera o monitor registrar o fim.
+async fn stop_account_jobs(state: &AppState, remote: &str) -> AppResult<()> {
+    let running: Vec<i64> =
+        state.jobs.managed_job_ids(remote)?.into_iter().filter(|id| state.jobs.is_running(*id)).collect();
+    for id in &running {
+        let _ = state.jobs.stop(*id).await;
+    }
+    for _ in 0..60 {
+        if !running.iter().any(|id| state.jobs.is_running(*id)) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Err(AppError::invalid("A sincronização desta conta não parou a tempo; tente novamente"))
+}
+
+/// Manda a cópia local para a Lixeira, mas só se tudo nela também estiver na nuvem
+/// (nada que exista só neste PC ou esteja diferente é descartado).
+async fn free_local_copy(
+    app: &AppHandle,
+    state: &AppState,
+    remote: &str,
+    rel: &str,
+    is_dir: bool,
+) -> AppResult<Option<String>> {
+    let (base, _) = base_for(app, state, remote)?;
+    let local = rel.split('/').fold(PathBuf::from(&base), |p, s| p.join(s));
+    if !local.exists() {
+        return Ok(None);
+    }
+    let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
+
+    let client = state.daemon.client()?;
+    let cloud_parent = format!("{remote}:{}", rel.rsplit_once('/').map(|(p, _)| p).unwrap_or(""));
+    let cloud_item = format!("{remote}:{rel}");
+    match local_copy_in_cloud(&client, &local, if is_dir { &cloud_item } else { &cloud_parent }, is_dir).await {
+        Ok(LocalVsCloud::Same) => {}
+        Ok(LocalVsCloud::Different { only_local, differ }) => {
+            return Ok(Some(format!(
+                "Mantive a cópia local de \"{name}\": {only_local} arquivo(s) só existem neste PC e {differ} estão \
+                 diferentes da nuvem. Envie-os ou apague-os manualmente se quiser liberar o espaço."
+            )))
+        }
+        Err(e) => {
+            return Ok(Some(format!(
+                "Mantive a cópia local de \"{name}\": não foi possível conferir com a nuvem ({e})."
+            )))
+        }
+    }
+
+    let target = local.clone();
+    tauri::async_runtime::spawn_blocking(move || trash::delete(&target))
+        .await
+        .map_err(|e| AppError::invalid(e.to_string()))?
+        .map_err(|e| AppError::invalid(format!("Não foi possível mover \"{name}\" para a Lixeira: {e}")))?;
+    Ok(Some(format!("Cópia local de \"{name}\" enviada para a Lixeira. O item continua disponível na nuvem.")))
 }
 
 #[tauri::command]

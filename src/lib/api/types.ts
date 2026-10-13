@@ -205,6 +205,11 @@ export interface FileEntry {
   localModMs: number | null;
 }
 
+export interface SetStateResult {
+  config: FilesConfig;
+  notice: string | null;
+}
+
 export interface FilesConfig {
   remote: string;
   base: string;
