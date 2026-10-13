@@ -325,9 +325,17 @@
             </button>
             <button class="btn btn-danger h-7 flex-1 justify-center text-[11px]" onclick={disableOndemand} disabled={ondemandBusy}>desativar</button>
           </div>
+          <button
+            class="btn h-7 justify-center text-[11px]"
+            onclick={() => remote && app.act(() => api.ondemandRefresh(remote!), "Verificando novidades da nuvem…")}
+            disabled={!ondemand.connected}
+          >
+            <RefreshCw size={12} /> verificar novidades agora
+          </button>
           <p class="text-[11px] leading-snug text-dim">
-            tudo da nuvem aparece lá sem ocupar espaço e baixa ao abrir. Botão direito: "Sempre manter neste dispositivo" ou
-            "Liberar espaço". Por enquanto a pasta é somente leitura.
+            tudo da nuvem aparece lá sem ocupar espaço e baixa ao abrir. Editar, criar, renomear e apagar ali vale
+            também na nuvem. Botão direito: "Sempre manter neste dispositivo" ou "Liberar espaço". Novidades da nuvem
+            chegam em até 2 min.
           </p>
         {:else}
           <p class="text-[11px] leading-snug text-muted">

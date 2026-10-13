@@ -76,6 +76,7 @@ export const api = {
   ondemandStatus: (remote: string) => invoke<OnDemandStatus>("ondemand_status", { remote }),
   enableOndemand: (remote: string) => invoke<OnDemandStatus>("enable_ondemand", { remote }),
   disableOndemand: (remote: string) => invoke<void>("disable_ondemand", { remote }),
+  ondemandRefresh: (remote: string) => invoke<void>("ondemand_refresh", { remote }),
 
   // tarefas
   listJobs: () => invoke<Job[]>("list_jobs"),
