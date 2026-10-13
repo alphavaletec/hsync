@@ -53,6 +53,12 @@ CREATE TABLE selections (
 );
 "#, r#"
 ALTER TABLE jobs ADD COLUMN on_change INTEGER NOT NULL DEFAULT 0;
+"#, r#"
+CREATE TABLE ondemand_dirs (
+    remote TEXT NOT NULL,
+    path   TEXT NOT NULL,
+    PRIMARY KEY (remote, path)
+);
 "#];
 
 const RUNS_KEPT_PER_JOB: i64 = 200;
@@ -345,6 +351,43 @@ impl Store {
             .optional()?)
     }
 
+    // ---- arquivos sob demanda: pastas já listadas pelo Windows (verificadas periodicamente) ----
+
+    pub fn add_ondemand_dir(&self, remote: &str, path: &str) -> AppResult<()> {
+        self.conn
+            .lock()
+            .unwrap()
+            .execute("INSERT OR IGNORE INTO ondemand_dirs (remote, path) VALUES (?1, ?2)", params![remote, path])?;
+        Ok(())
+    }
+
+    pub fn list_ondemand_dirs(&self, remote: &str) -> AppResult<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT path FROM ondemand_dirs WHERE remote = ?1 ORDER BY length(path)")?;
+        let rows = stmt.query_map([remote], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Remove a pasta e as subpastas (`path` vazio = tudo da conta).
+    pub fn remove_ondemand_dirs(&self, remote: &str, path: &str) -> AppResult<()> {
+        self.conn.lock().unwrap().execute(
+            "DELETE FROM ondemand_dirs WHERE remote = ?1
+               AND (?2 = '' OR path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/')",
+            params![remote, path],
+        )?;
+        Ok(())
+    }
+
+    /// Pasta renomeada: ela e as subpastas registradas passam a usar o novo caminho.
+    pub fn rename_ondemand_dirs(&self, remote: &str, from: &str, to: &str) -> AppResult<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE OR REPLACE ondemand_dirs SET path = ?3 || substr(path, length(?2) + 1)
+             WHERE remote = ?1 AND (path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/')",
+            params![remote, from, to],
+        )?;
+        Ok(())
+    }
+
     pub fn settings_with_prefix(&self, prefix: &str) -> AppResult<Vec<(String, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1")?;
@@ -501,6 +544,25 @@ mod tests {
         assert_eq!(s.get_setting("files.base.mega 1").unwrap().as_deref(), Some("C:\\HSync\\mega"));
         assert_eq!(s.get_setting("files.base.mega").unwrap(), None);
         assert!(s.jobs_using_remote("mega").unwrap().is_empty());
+    }
+
+    #[test]
+    fn ondemand_dirs_prefix_removal() {
+        let s = Store::open_in_memory().unwrap();
+        for p in ["", "Clientes", "Clientes/A", "Clientes/A/x", "ClientesB"] {
+            s.add_ondemand_dir("mega", p).unwrap();
+        }
+        s.add_ondemand_dir("mega", "Clientes").unwrap(); // repetido é ignorado
+        s.remove_ondemand_dirs("mega", "Clientes/A").unwrap();
+        assert_eq!(s.list_ondemand_dirs("mega").unwrap(), vec!["", "Clientes", "ClientesB"]);
+        s.add_ondemand_dir("mega", "Clientes/C/d").unwrap();
+        s.rename_ondemand_dirs("mega", "Clientes", "Arquivo/Clientes").unwrap();
+        assert_eq!(
+            s.list_ondemand_dirs("mega").unwrap(),
+            vec!["", "ClientesB", "Arquivo/Clientes", "Arquivo/Clientes/C/d"]
+        );
+        s.remove_ondemand_dirs("mega", "").unwrap();
+        assert!(s.list_ondemand_dirs("mega").unwrap().is_empty());
     }
 
     #[test]

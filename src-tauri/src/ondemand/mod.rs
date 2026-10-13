@@ -1,8 +1,10 @@
 //! Arquivos sob demanda, como o OneDrive: uma pasta por conta, registrada no Windows
 //! (Cloud Filter API), onde tudo da nuvem aparece sem ocupar espaço e baixa ao abrir.
-//! Fase 1: somente leitura (ver, abrir, manter neste dispositivo, liberar espaço).
+//! Editar, criar, renomear e apagar refletem na nuvem; novidades da nuvem aparecem sozinhas.
 #[cfg(windows)]
 mod filter;
+#[cfg(windows)]
+mod sync;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,7 +29,7 @@ pub struct OnDemandStatus {
 }
 
 #[cfg(windows)]
-type Conn = cloud_filter::root::Connection<filter::CloudFilter>;
+type Conn = (cloud_filter::root::Connection<filter::CloudFilter>, sync::AccountSync);
 #[cfg(not(windows))]
 type Conn = ();
 
@@ -64,6 +66,16 @@ impl OnDemand {
             connected: self.conns.lock().unwrap().contains_key(remote),
             path,
         })
+    }
+
+    /// Pede ao sincronizador da conta uma verificação imediata de novidades da nuvem.
+    pub fn refresh_now(&self, remote: &str) -> AppResult<()> {
+        #[cfg(windows)]
+        if let Some((_, account)) = self.conns.lock().unwrap().get(remote) {
+            account.refresh();
+            return Ok(());
+        }
+        Err(AppError::invalid("Arquivos sob demanda não estão ativos nesta conta"))
     }
 
     pub fn is_enabled(&self, remote: &str) -> bool {
@@ -106,6 +118,7 @@ impl OnDemand {
             }
         }
         self.store.delete_setting(&setting_key(remote))?;
+        self.store.remove_ondemand_dirs(remote, "")?;
         if let Some(p) = path {
             if std::path::Path::new(&p).exists() {
                 if let Err(e) = trash::delete(&p) {
@@ -150,13 +163,28 @@ impl OnDemand {
             id.register(info).map_err(|e| err("registrar no Explorer", e))?;
         }
         let daemon = self.daemon.clone();
-        let filter = filter::CloudFilter {
-            remote: remote.to_string(),
-            root: root.clone(),
-            client: Arc::new(move || daemon.client()),
-        };
+        let client: filter::ClientSource = Arc::new(move || daemon.client());
+        // Sincronizador da conta (PC → nuvem e novidades da nuvem → PC).
+        let account = sync::AccountSync::start(remote.to_string(), root.clone(), client.clone(), self.store.clone());
+        let queue = account.queuer();
+        let (store, name) = (self.store.clone(), remote.to_string());
+        let events: filter::EventSink = Arc::new(move |ev| {
+            let res = match ev {
+                filter::FilterEvent::Populated(dir) => store.add_ondemand_dir(&name, &dir),
+                filter::FilterEvent::Gone(dir) => store.remove_ondemand_dirs(&name, &dir),
+                filter::FilterEvent::DirMoved(from, to) => store.rename_ondemand_dirs(&name, &from, &to),
+                filter::FilterEvent::MovedIn(path) => {
+                    queue(path);
+                    Ok(())
+                }
+            };
+            if let Err(e) = res {
+                log::warn!("sob demanda ({name}): {e}");
+            }
+        });
+        let filter = filter::CloudFilter { remote: remote.to_string(), root: root.clone(), client, events };
         let conn = Session::new().connect(&root, filter).map_err(|e| err("conectar", e))?;
-        self.conns.lock().unwrap().insert(remote.to_string(), conn);
+        self.conns.lock().unwrap().insert(remote.to_string(), (conn, account));
         log::info!("sob demanda: {remote} conectado em {}", root.display());
         Ok(())
     }

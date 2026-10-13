@@ -113,6 +113,7 @@ pub fn run() {
             commands::ondemand::ondemand_status,
             commands::ondemand::enable_ondemand,
             commands::ondemand::disable_ondemand,
+            commands::ondemand::ondemand_refresh,
             commands::accounts::test_remote,
             commands::accounts::delete_remote,
             commands::accounts::list_remote_dirs,

@@ -20,3 +20,8 @@ pub async fn enable_ondemand(app: AppHandle, state: State<'_, AppState>, remote:
 pub fn disable_ondemand(state: State<'_, AppState>, remote: String) -> AppResult<()> {
     state.ondemand.disable(&remote)
 }
+
+#[tauri::command]
+pub fn ondemand_refresh(state: State<'_, AppState>, remote: String) -> AppResult<()> {
+    state.ondemand.refresh_now(&remote)
+}
