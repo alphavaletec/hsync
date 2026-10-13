@@ -76,8 +76,10 @@ npm run check                  # svelte-check
 
 ```bash
 npm run fetch-rclone
-npm run tauri build            # instalador NSIS em <target-dir>/release/bundle/nsis/
+npm run bundle                 # instalador NSIS em <target-dir>/release/bundle/nsis/
 ```
+
+`npm run bundle` executa `tauri build` compilando o frontend numa pasta temporária, porque dentro do Dropbox o `dist/` fica travado. O resultado é o mesmo do `npm run tauri build`. O instalador fica em torno de 22 MB: app com cerca de 6 MB mais o rclone, comprimido.
 
 `tauri.conf.json` declara `bundle.externalBin: ["binaries/rclone"]`. O Tauri procura `rclone-x86_64-pc-windows-msvc.exe` e o instala ao lado do `HSync.exe` como `rclone.exe`. Para ARM64, use `scripts/fetch-rclone.ps1 -Target aarch64-pc-windows-msvc` e `npm run tauri build -- --target aarch64-pc-windows-msvc`.
 
