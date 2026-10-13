@@ -5,7 +5,10 @@ Gerenciador visual de sincronização e backup em nuvem (Google Drive, OneDrive,
 - 100% local: o tráfego vai direto do seu computador para o provedor. Tokens e senhas ficam no `rclone.conf` deste PC, sem nenhum servidor intermediário.
 - Modos **cópia**, **espelho** (sync) e **bidirecional** (bisync), com filtros, simulação (dry-run) e agendamento.
 - **Aba Arquivos:** navega qualquer conta, mesclando a nuvem com a cópia local. Cada arquivo ou pasta recebe um estado: **⇄ sincronizar**, **↓ manter offline**, **↑ só enviar** ou **⊘ ignorar**. Também dá para baixar e enviar na hora.
+- **Pré-visualização** sem sair do app: PDF, imagens, áudio/vídeo, texto/código e Office (Word, Excel e PowerPoint). Tudo é renderizado localmente, sem visualizadores online.
+- **Painel com mapa de sincronização:** pastas locais → rclone → contas, com animação do sentido dos dados nas tarefas ativas.
 - Monitoramento em tempo real: velocidade, progresso, arquivos em transferência, histórico e log.
+- **Reautorizar** contas com login pelo navegador (token expirado ou acesso revogado), sem perder a configuração.
 - Fica na bandeja: fechar a janela não interrompe os agendamentos.
 
 ## Arquitetura
@@ -89,3 +92,4 @@ Para distribuição, assine o `HSync.exe` e o instalador. O SmartScreen e alguns
 - **Arquivos ocultos:** o filtro "ignorar ocultos" cobre dotfiles e arquivos de sistema do Windows (`desktop.ini`, `Thumbs.db`, lixeira). O atributo *Hidden* do NTFS não é suportado pelo rclone.
 - **Limite de banda:** é global (`core/bwlimit`). O rclone não aplica limite por tarefa via RC.
 - **Agendamento:** só roda com o HSync aberto (na bandeja). A opção "iniciar com o sistema" abre o app minimizado.
+- **Pré-visualização:** o arquivo vai para um cache privado (`<app_local_data>/preview`), que é limpo a cada sessão. É o único diretório exposto ao webview pelo asset protocol. Links dentro de documentos não navegam, e "abrir no aplicativo" é validado no Rust: só arquivos do cache e só tipos de documento ou mídia (nunca executáveis). Formatos antigos (.doc, .ppt) não têm renderizador local.

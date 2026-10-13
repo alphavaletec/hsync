@@ -26,5 +26,9 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     // Os renderizadores de Office (pptx/xlsx) são chunks grandes, mas carregados sob demanda.
     chunkSizeWarningLimit: 1500,
+    // dist/ é limpo por scripts/clean-dist.mjs (com novas tentativas) antes do build.
+    emptyOutDir: false,
+    // scripts/bundle.mjs compila fora da pasta do projeto (ver HSYNC_OUT_DIR).
+    outDir: process.env.HSYNC_OUT_DIR || "dist",
   },
 });

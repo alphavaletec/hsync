@@ -3,7 +3,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{AppHandle, State};
+
+use super::files::{base_key, default_base};
 
 use crate::error::{AppError, AppResult};
 use crate::rclone::client::clean_error;
@@ -331,6 +333,74 @@ pub async fn oauth_progress(state: State<'_, AppState>, name: String, kind: Stri
             Ok(OAuthProgress { finished: true, auth_url: None, next: None, error: Some(e.to_string()) })
         }
     }
+}
+
+/// Renomeia uma conta. O rclone não tem "renomear" no RC: a configuração (com segredos já
+/// ofuscados) é copiada para o novo nome sem reprocessar nada, conferida, e só então o nome
+/// antigo é apagado. Tarefas, seleções e a pasta local da aba Arquivos acompanham o novo nome.
+#[tauri::command]
+pub async fn rename_remote(app: AppHandle, state: State<'_, AppState>, old: String, new: String) -> AppResult<()> {
+    let new = new.trim().to_string();
+    validate_remote_name(&new)?;
+    if new == old {
+        return Ok(());
+    }
+    let client = state.daemon.client()?;
+    ensure_remote(&client, &old).await?;
+    if client.list_remotes().await?.iter().any(|r| r != &old && r.eq_ignore_ascii_case(&new)) {
+        return Err(AppError::invalid(format!("Já existe uma conta chamada \"{new}\"")));
+    }
+    if pending_kind(&state, &old).is_some() || pending_kind(&state, &new).is_some() {
+        return Err(AppError::invalid("Conclua ou cancele a configuração em andamento desta conta"));
+    }
+    let prefix = format!("{old}:");
+    if state
+        .jobs
+        .list_jobs()?
+        .iter()
+        .any(|j| j.running && (j.source.starts_with(&prefix) || j.dest.starts_with(&prefix)))
+    {
+        return Err(AppError::invalid("Aguarde as sincronizações desta conta terminarem (ou pare-as no painel)"));
+    }
+
+    let original = client.call("config/get", json!({ "name": old })).await?;
+    let mut parameters = original.as_object().cloned().unwrap_or_default();
+    let kind = parameters.remove("type").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    // noObscure: os valores já estão ofuscados. A resposta pode trazer uma pergunta da máquina de
+    // estados (ex.: "renovar o token?"), que é ignorada: os parâmetros já foram gravados.
+    client
+        .call(
+            "config/create",
+            json!({ "name": new, "type": kind, "parameters": parameters,
+                    "opt": { "nonInteractive": true, "noObscure": true } }),
+        )
+        .await?;
+    let copied = client.call("config/get", json!({ "name": new })).await?;
+    if copied != original {
+        let _ = client.config_delete(&new).await;
+        return Err(AppError::invalid("A cópia da configuração não conferiu; nada foi alterado"));
+    }
+
+    // Fixa a pasta local atual: com o nome padrão ela mudaria junto com o nome da conta.
+    if state.store.get_setting(&base_key(&old))?.is_none() {
+        let current = default_base(&app, &old)?;
+        state.store.set_setting(&base_key(&old), &current.to_string_lossy())?;
+    }
+    let affected = match state.store.rename_remote(&old, &new) {
+        Ok(ids) => ids,
+        Err(e) => {
+            let _ = client.config_delete(&new).await;
+            return Err(e);
+        }
+    };
+    for id in affected {
+        state.jobs.remove_job_files(id);
+    }
+    if let Err(e) = client.config_delete(&old).await {
+        log::warn!("conta \"{old}\" copiada para \"{new}\", mas o nome antigo não foi removido: {e}");
+    }
+    state.jobs.emit_jobs_changed();
+    Ok(())
 }
 
 /// Renova o login (OAuth) de uma conta existente, ex.: token expirado ou acesso revogado.

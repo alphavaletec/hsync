@@ -104,6 +104,7 @@ pub fn run() {
             commands::accounts::oauth_progress,
             commands::accounts::cancel_remote_config,
             commands::accounts::reauthorize_remote,
+            commands::accounts::rename_remote,
             commands::accounts::test_remote,
             commands::accounts::delete_remote,
             commands::accounts::list_remote_dirs,

@@ -1,15 +1,54 @@
 <script lang="ts">
-  import { Activity, Cloud, KeyRound, LoaderCircle, Plus, Trash2 } from "@lucide/svelte";
+  import { Activity, Cloud, KeyRound, LoaderCircle, Pencil, Plus, Trash2 } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage } from "../../api/commands";
   import type { Remote, RemoteTest } from "../../api/types";
   import { app } from "../../stores/app.svelte";
+  import { toasts } from "../../stores/toasts.svelte";
   import { formatBytes, providerLabel, remoteOf } from "../../utils/format";
   import AccountWizard from "../accounts/AccountWizard.svelte";
+  import Modal from "../ui/Modal.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   let wizard = $state(false);
   let reauth = $state<{ name: string; kind: string } | null>(null);
+  let renaming = $state<Remote | null>(null);
+  let newName = $state("");
+  let renameError = $state<string | null>(null);
+  let renameBusy = $state(false);
+
+  function startRename(r: Remote) {
+    renaming = r;
+    newName = r.name;
+    renameError = null;
+  }
+
+  async function confirmRename() {
+    if (!renaming) return;
+    const old = renaming.name;
+    const next = newName.trim();
+    if (next === old) {
+      renaming = null;
+      return;
+    }
+    renameBusy = true;
+    renameError = null;
+    try {
+      await api.renameRemote(old, next);
+      if (app.filesRemote === old) app.filesRemote = next;
+      if (tests[old]) {
+        tests[next] = tests[old];
+        delete tests[old];
+      }
+      renaming = null;
+      toasts.push("ok", `Conta renomeada: ${old}: → ${next}:`);
+      await Promise.all([app.refreshRemotes(), app.refreshJobs()]);
+    } catch (e) {
+      renameError = errorMessage(e);
+    } finally {
+      renameBusy = false;
+    }
+  }
 
   // Provedores que fazem login pelo navegador (OAuth) e por isso podem ter o login renovado.
   const OAUTH_KINDS = new Set(["drive", "onedrive", "dropbox", "box", "pcloud", "gphotos", "yandex", "zoho", "hidrive", "jottacloud", "sharefile", "putio", "premiumizeme", "pikpak"]);
@@ -112,7 +151,8 @@
               <KeyRound size={13} /> reautorizar
             </button>
           {/if}
-          <button class="btn btn-icon btn-danger ml-auto" onclick={() => remove(r)} title="Remover"><Trash2 size={14} /></button>
+          <button class="btn btn-icon ml-auto" onclick={() => startRename(r)} title="Renomear" aria-label="Renomear {r.name}"><Pencil size={13} /></button>
+          <button class="btn btn-icon btn-danger" onclick={() => remove(r)} title="Remover"><Trash2 size={14} /></button>
         </div>
       </article>
     {/each}
@@ -134,4 +174,32 @@
       }}
     />
   {/key}
+{/if}
+
+{#if renaming}
+  <Modal title="renomear conta — {renaming.name}:" width="520px" onclose={() => (renaming = null)}>
+    <div class="flex flex-col gap-3">
+      <label class="field-label" for="rename-input">novo nome</label>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        id="rename-input"
+        class="input"
+        bind:value={newName}
+        maxlength="64"
+        autofocus
+        onkeydown={(e) => e.key === "Enter" && confirmRename()}
+      />
+      <p class="text-[11.5px] text-muted">
+        tarefas, itens marcados na aba Arquivos e a pasta local passam a usar o novo nome. A pasta local continua
+        a mesma no disco; nada muda na nuvem.
+      </p>
+      {#if renameError}<p class="selectable text-[12px] text-err">✕ {renameError}</p>{/if}
+    </div>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (renaming = null)}>cancelar</button>
+      <button class="btn btn-primary" onclick={confirmRename} disabled={renameBusy || !newName.trim()}>
+        {renameBusy ? "renomeando…" : "renomear"}
+      </button>
+    {/snippet}
+  </Modal>
 {/if}

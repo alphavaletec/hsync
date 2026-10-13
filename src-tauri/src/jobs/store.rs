@@ -140,6 +140,51 @@ impl Store {
         Ok(id)
     }
 
+    /// Troca o nome de uma conta em tudo que a referencia: caminhos das tarefas (`old:` → `new:`),
+    /// tarefas gerenciadas da aba Arquivos, seleções e configurações. Devolve os ids das tarefas
+    /// afetadas (o estado do bisync delas é zerado, pois os caminhos mudaram).
+    pub fn rename_remote(&self, old: &str, new: &str) -> AppResult<Vec<i64>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let (old_p, new_p) = (format!("{old}:"), format!("{new}:"));
+        let ids: Vec<i64> = tx
+            .prepare(
+                "SELECT id FROM jobs WHERE substr(source, 1, length(?1)) = ?1 OR substr(dest, 1, length(?1)) = ?1",
+            )?
+            .query_map([&old_p], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        for col in ["source", "dest"] {
+            tx.execute(
+                &format!("UPDATE jobs SET {col} = ?2 || substr({col}, length(?1) + 1) WHERE substr({col}, 1, length(?1)) = ?1"),
+                params![old_p, new_p],
+            )?;
+        }
+        let (old_m, new_m) = (format!("files:{old}:"), format!("files:{new}:"));
+        // Tarefas da aba Arquivos: chave e nome ("mega ⇄ sincronizados") acompanham a conta.
+        tx.execute(
+            "UPDATE jobs SET managed = ?2 || substr(managed, length(?1) + 1),
+                             name = CASE WHEN substr(name, 1, length(?3)) = ?3 THEN ?4 || substr(name, length(?3) + 1) ELSE name END
+             WHERE substr(managed, 1, length(?1)) = ?1",
+            params![old_m, new_m, old, new],
+        )?;
+        tx.execute(
+            &format!(
+                "UPDATE jobs SET bisync_initialized = 0, updated_at = ?1 WHERE id IN ({})",
+                ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+            ),
+            [now_ms()],
+        )?;
+        tx.execute("UPDATE selections SET remote = ?2 WHERE remote = ?1", params![old, new])?;
+        for prefix in ["files.base.", "files.interval."] {
+            tx.execute(
+                "UPDATE settings SET key = ?2 WHERE key = ?1",
+                params![format!("{prefix}{old}"), format!("{prefix}{new}")],
+            )?;
+        }
+        tx.commit()?;
+        Ok(ids)
+    }
+
     // ---- seleção por item (aba Arquivos) ----
 
     pub fn list_selections(&self, remote: &str) -> AppResult<Vec<Selection>> {
@@ -404,6 +449,41 @@ mod tests {
 
         s.delete_job(id).unwrap();
         assert!(s.list_runs(None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn renames_remote_everywhere() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = input("Fotos");
+        a.dest = "mega:Fotos".into();
+        let plain = s.insert_job(&a).unwrap();
+        s.set_bisync_initialized(plain, true).unwrap();
+        let mut other = input("Outra");
+        other.dest = "megazord:x".into(); // prefixo parecido não pode ser afetado
+        let untouched = s.insert_job(&other).unwrap();
+        let mut managed = input("mega ⇄ sincronizados");
+        managed.source = "C:\\HSync\\mega".into();
+        managed.dest = "mega:".into();
+        let m = s.insert_managed_job(&managed, "files:mega:sync").unwrap();
+        s.set_selection("mega", "Clientes", true, Some(ItemState::Sync)).unwrap();
+        s.set_setting("files.base.mega", "C:\\HSync\\mega").unwrap();
+
+        let mut ids = s.rename_remote("mega", "mega 1").unwrap();
+        ids.sort();
+        assert_eq!(ids, vec![plain, m]);
+        let j = s.get_job(plain).unwrap();
+        assert_eq!(j.dest, "mega 1:Fotos");
+        assert!(!j.bisync_initialized);
+        assert_eq!(s.get_job(untouched).unwrap().dest, "megazord:x");
+        let mj = s.get_job(m).unwrap();
+        assert_eq!((mj.dest.as_str(), mj.name.as_str()), ("mega 1:", "mega 1 ⇄ sincronizados"));
+        assert_eq!(mj.managed.as_deref(), Some("files:mega 1:sync"));
+        assert_eq!(s.find_managed_job("files:mega 1:sync").unwrap(), Some(m));
+        assert_eq!(s.list_selections("mega 1").unwrap().len(), 1);
+        assert!(s.list_selections("mega").unwrap().is_empty());
+        assert_eq!(s.get_setting("files.base.mega 1").unwrap().as_deref(), Some("C:\\HSync\\mega"));
+        assert_eq!(s.get_setting("files.base.mega").unwrap(), None);
+        assert!(s.jobs_using_remote("mega").unwrap().is_empty());
     }
 
     #[test]

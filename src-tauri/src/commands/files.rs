@@ -49,14 +49,14 @@ pub struct ItemRef {
     pub is_dir: bool,
 }
 
-fn base_key(remote: &str) -> String {
+pub(crate) fn base_key(remote: &str) -> String {
     format!("files.base.{remote}")
 }
 fn interval_key(remote: &str) -> String {
     format!("files.interval.{remote}")
 }
 
-fn default_base(app: &AppHandle, remote: &str) -> AppResult<PathBuf> {
+pub(crate) fn default_base(app: &AppHandle, remote: &str) -> AppResult<PathBuf> {
     let home = app.path().home_dir().map_err(|e| AppError::invalid(e.to_string()))?;
     // Nome de pasta seguro no Windows (o nome da conta pode ter espaço, +, @…).
     let safe: String = remote.chars().map(|c| if c.is_ascii_alphanumeric() || "-_. ".contains(c) { c } else { '_' }).collect();

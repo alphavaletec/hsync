@@ -445,7 +445,7 @@ impl JobManager {
         self.emit_jobs_changed();
     }
 
-    fn emit_jobs_changed(&self) {
+    pub fn emit_jobs_changed(&self) {
         let _ = self.app.emit("jobs-changed", ());
     }
 
