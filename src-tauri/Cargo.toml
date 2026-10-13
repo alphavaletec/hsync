@@ -53,3 +53,8 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# cloud-filter 0.0.6 com correções (ver vendor/cloud-filter/HSYNC-PATCH.md): falha de download
+# sob demanda derrubava o app (pânico dentro do callback do Windows).
+[patch.crates-io]
+cloud-filter = { path = "vendor/cloud-filter" }

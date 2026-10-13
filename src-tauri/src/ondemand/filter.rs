@@ -249,9 +249,15 @@ impl SyncFilter for CloudFilter {
         let remote_path = relative(&self.root, &request.path());
         let range = info.required_file_range();
         let total = request.file_size();
-        log::info!("sob demanda: baixando {}:{remote_path} ({}..{} de {total})", self.remote, range.start, range.end);
+        // Programa que pediu o arquivo (o `name()` do crate costuma vir "UNKNOWN").
+        let who = request
+            .process()
+            .path()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "?".into());
+        log::info!("sob demanda: baixando {}:{remote_path} ({}..{} de {total}) para {who}", self.remote, range.start, range.end);
         tauri::async_runtime::block_on(self.download(&ticket, &remote_path, range.start, range.end, total))
-            .map_err(|e| self.fail(&format!("baixar {remote_path}"), e))
+            .map_err(|e| self.fail(&format!("baixar {remote_path} ({}..{} de {total}, para {who})", range.start, range.end), e))
     }
 
     /// "Liberar espaço": os dados continuam na nuvem, então sempre pode.

@@ -134,7 +134,19 @@ fn is_temporary(path: &Path) -> bool {
 /// Usa `fixed_size_info` com o tamanho máximo de blob: `info()` do crate entra em pânico com
 /// placeholders sem blob (fatia além do buffer) — e no release um pânico encerraria o app.
 fn placeholder_info(path: &Path) -> Option<PlaceholderInfo> {
-    Placeholder::open(path).ok()?.fixed_size_info(MAX_BLOB).ok().flatten()
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const FILE_SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    // Só atributos: abrir com `CfOpenFileWithOplock` (o `Placeholder::open` do crate) faz o
+    // Windows baixar de novo um arquivo recém-liberado com "Liberar espaço".
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_ALL)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    Placeholder::from(file).fixed_size_info(MAX_BLOB).ok().flatten()
 }
 
 /// Abre para converter/atualizar o placeholder. Essas operações exigem um handle Win32 comum —
@@ -151,6 +163,50 @@ fn open_for_update(path: &Path, exclusive: bool) -> std::io::Result<Placeholder>
         .share_mode(if exclusive { 0 } else { FILE_SHARE_ALL })
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?;
+    Ok(Placeholder::from(file))
+}
+
+/// O que o menu do Explorer pediu para um arquivo já sincronizado.
+#[derive(Debug, PartialEq)]
+enum PinAction {
+    /// "Liberar espaço": o Explorer só marca como não fixado; descartar o conteúdo é com o provedor.
+    FreeUp,
+    /// "Sempre manter neste dispositivo": baixar o que falta.
+    Download,
+}
+
+fn pin_action(info: &PlaceholderInfo, size: u64) -> Option<PinAction> {
+    let on_disk = info.on_disk_data_size().max(0) as u64;
+    match info.pin_state() {
+        PinState::Unpinned if on_disk > 0 => Some(PinAction::FreeUp),
+        PinState::Pinned if on_disk < size => Some(PinAction::Download),
+        _ => None,
+    }
+}
+
+/// Metadados do placeholder para a versão da nuvem. O Windows pede downloads com base neste
+/// tamanho: se ficar desatualizado (ex.: depois de enviar uma edição), o download é recusado.
+fn file_metadata(size: u64, mtime: Option<i64>) -> Metadata {
+    let t = file_time(mtime);
+    Metadata::file().created(t).written(t).changed(t).size(size).attributes(FILE_ATTRIBUTE_NORMAL)
+}
+
+/// Depois de enviar uma edição, o conteúdo local passa a ser a versão da nuvem. O Windows trata
+/// o que foi escrito localmente como "modificado" mesmo marcado em sincronia — e nem libera
+/// esse trecho nem conhece o tamanho novo (downloads seguintes seriam recusados). Reverter e
+/// converter de novo faz o arquivo inteiro contar como dado da nuvem.
+fn adopt_local_data(p: &mut Placeholder, blob: Vec<u8>) -> Result<(), String> {
+    p.revert().map_err(|e| format!("reverter placeholder: {e}"))?;
+    p.convert_to_placeholder(ConvertOptions::default().mark_in_sync().blob(blob), None)
+        .map_err(|e| format!("converter placeholder: {e}"))?;
+    Ok(())
+}
+
+/// Abre só para leitura, para pedir a hidratação ao Windows (`CfHydratePlaceholder`).
+fn open_for_hydrate(path: &Path) -> std::io::Result<Placeholder> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
+    let file = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_ALL).open(path)?;
     Ok(Placeholder::from(file))
 }
 
@@ -235,7 +291,8 @@ impl Worker {
         }))
     }
 
-    /// Enfileira tudo que não está em sincronia (o que não é placeholder ou foi alterado).
+    /// Enfileira tudo que não está em sincronia (o que não é placeholder ou foi alterado)
+    /// e os arquivos com pedido pendente do Explorer (liberar espaço / manter no dispositivo).
     fn scan_unsynced(&mut self, dir: &Path) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten() {
@@ -247,6 +304,8 @@ impl Worker {
                 Some(i) if i.is_in_sync() => {
                     if p.is_dir() {
                         self.scan_unsynced(&p);
+                    } else if pin_action(&i, e.metadata().map(|m| m.len()).unwrap_or(0)).is_some() {
+                        self.pending.insert(p, Instant::now() - SETTLE);
                     }
                 }
                 _ => {
@@ -284,8 +343,15 @@ impl Worker {
             return Ok(Outcome::Done);
         }
         let info = placeholder_info(path);
-        if info.as_ref().is_some_and(PlaceholderInfo::is_in_sync) {
-            return Ok(Outcome::Done);
+        if let Some(i) = info.as_ref().filter(|i| i.is_in_sync()) {
+            if meta.is_dir() {
+                // Pedido numa pasta: o Explorer marca cada item; os já listados são revistos.
+                if matches!(i.pin_state(), PinState::Pinned | PinState::Unpinned) {
+                    self.scan_unsynced(path);
+                }
+                return Ok(Outcome::Done);
+            }
+            return Ok(self.apply_pin(path, &rel, i, meta.len()));
         }
         let fs = format!("{}:", self.remote);
 
@@ -352,17 +418,54 @@ impl Worker {
         }
         let cloud = self.stat_cloud(&rel)?;
         let blob = cloud.as_ref().map(CloudItem::blob).unwrap_or_default();
-        let mut ph = match open_for_update(path, false) {
+        // Exclusivo para refazer o placeholder; aberto em outro programa → tenta depois.
+        let mut ph = match open_for_update(path, info.is_some()) {
             Ok(p) => p,
             Err(_) => return Ok(Outcome::Retry),
         };
         let res = if info.is_none() {
-            ph.convert_to_placeholder(ConvertOptions::default().mark_in_sync().blob(blob), None).map(|_| ())
+            ph.convert_to_placeholder(ConvertOptions::default().mark_in_sync().blob(blob), None).map(|_| ()).map_err(|e| e.to_string())
         } else {
-            ph.update(UpdateOptions::default().mark_in_sync().blob(&blob), None).map(|_| ())
+            adopt_local_data(&mut ph, blob)
         };
         res.map_err(|e| AppError::invalid(format!("marcar como sincronizado: {e}")))?;
         Ok(Outcome::Done)
+    }
+
+    /// Atende "Liberar espaço" e "Sempre manter neste dispositivo" num arquivo sincronizado.
+    fn apply_pin(&self, path: &Path, rel: &str, info: &PlaceholderInfo, size: u64) -> Outcome {
+        match pin_action(info, size) {
+            Some(PinAction::FreeUp) => {
+                // Exclusivo: não dá para descartar o conteúdo de um arquivo aberto em outro programa.
+                let Ok(mut p) = open_for_update(path, true) else { return Outcome::Retry };
+                // Editado aqui antes desta versão: o trecho local ainda conta como "modificado".
+                if info.modified_data_size() > 0 {
+                    if let Err(e) = adopt_local_data(&mut p, info.blob().to_vec()) {
+                        report!(info, "sob demanda ({}): liberar espaço de {rel}: {e}", self.remote);
+                        return Outcome::Retry;
+                    }
+                }
+                if let Err(e) = p.update(UpdateOptions::default().dehydrate().mark_in_sync(), None) {
+                    report!(info, "sob demanda ({}): liberar espaço de {rel}: {e}", self.remote);
+                    return Outcome::Retry;
+                }
+                // Volta ao estado neutro: se for aberto de novo, fica até o próximo "liberar espaço".
+                let _ = p.mark_pin(PinState::Unspecified, Default::default());
+                report!(info, "sob demanda ({}): espaço liberado: {rel}", self.remote);
+                Outcome::Done
+            }
+            Some(PinAction::Download) => {
+                let Ok(mut p) = open_for_hydrate(path) else { return Outcome::Retry };
+                match p.hydrate(..) {
+                    Ok(()) => Outcome::Done,
+                    Err(e) => {
+                        report!(info, "sob demanda ({}): baixar {rel}: {e}", self.remote);
+                        Outcome::Retry
+                    }
+                }
+            }
+            None => Outcome::Done,
+        }
     }
 
     /// Traz para as pastas já listadas as mudanças feitas na nuvem.
@@ -437,10 +540,7 @@ impl Worker {
     }
 
     fn refresh_file(&self, path: &Path, rel: &str, cloud: &CloudItem, info: &PlaceholderInfo) {
-        let t = file_time(cloud.mtime);
-        let metadata = || {
-            Metadata::file().created(t).written(t).changed(t).size(cloud.size).attributes(FILE_ATTRIBUTE_NORMAL)
-        };
+        let metadata = || file_metadata(cloud.size, cloud.mtime);
         let blob = cloud.blob();
         match parse_meta_blob(info.blob()) {
             // Placeholder da fase 1 (somente leitura, sem versão guardada): adota a versão atual.
@@ -630,6 +730,42 @@ mod tests {
             }
             acc.refresh();
             wait("versão da nuvem voltar ao PC", 20, &|| r.join("Pasta").join("c.txt").exists())?;
+            // 9. "Liberar espaço" no Explorer (só marca como não fixado) → o conteúdo sai do disco.
+            let b2 = r.join("b2.txt");
+            let size = std::fs::metadata(d.join("b2.txt")).map_err(|e| e.to_string())?.len() as i64;
+            wait("b2.txt baixado e sincronizado", 20, &|| {
+                placeholder_info(&b2).is_some_and(|i| i.is_in_sync() && i.on_disk_data_size() == size)
+            })?;
+            let state = |p: &Path| {
+                placeholder_info(p).map(|i| {
+                    format!(
+                        "em disco {} validado {} modificado {} pin {:?} em sincronia {} tamanho {:?}",
+                        i.on_disk_data_size(),
+                        i.validated_data_size(),
+                        i.modified_data_size(),
+                        i.pin_state(),
+                        i.is_in_sync(),
+                        std::fs::metadata(p).map(|m| m.len()).ok()
+                    )
+                })
+            };
+            let freed = || {
+                placeholder_info(&b2).is_some_and(|i| i.on_disk_data_size() == 0 && i.pin_state() == PinState::Unspecified)
+            };
+            cmd(&format!("attrib -P +U {}", q(&b2)))?;
+            wait("liberar espaço", 20, &freed).map_err(|e| format!("{e}: {:?} (nuvem: {size} bytes)", state(&b2)))?;
+            // 10. "Sempre manter neste dispositivo" → baixa de novo sem ninguém abrir.
+            cmd(&format!("attrib -U +P {}", q(&b2)))?;
+            wait("manter neste dispositivo", 20, &|| placeholder_info(&b2).is_some_and(|i| i.on_disk_data_size() == size))
+                .map_err(|e| format!("{e}: {:?}", state(&b2)))?;
+            // 11. Liberado e aberto de novo: fica no PC até o próximo "Liberar espaço".
+            cmd(&format!("attrib -P +U {}", q(&b2)))?;
+            wait("liberar espaço de novo", 20, &freed).map_err(|e| format!("{e}: {:?}", state(&b2)))?;
+            cmd(&format!("type {}", q(&b2)))?;
+            std::thread::sleep(SETTLE + Duration::from_secs(3));
+            if !placeholder_info(&b2).is_some_and(|i| i.on_disk_data_size() == size) {
+                return Err(format!("aberto de novo: deveria continuar no PC: {:?}", state(&b2)));
+            }
             Ok(())
         })
         .await
