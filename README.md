@@ -85,6 +85,18 @@ npm run bundle                 # instalador NSIS em <target-dir>/release/bundle/
 
 Para distribuição, assine o `HSync.exe` e o instalador. O SmartScreen e alguns antivírus sinalizam binários não assinados. No macOS, o sidecar precisa ser assinado e notarizado junto com o app.
 
+## Atualizações automáticas
+
+O app instalado consulta `https://github.com/alphavaletec/hsync/releases/latest/download/latest.json` ao abrir e a cada 6 horas (e em **config → verificar agora**). Havendo versão maior, mostra um aviso; ao confirmar, baixa o instalador, confere a assinatura com a chave pública embutida em `tauri.conf.json`, instala e reabre. Contas, tarefas e configurações ficam como estão. Isso exige que o repositório (ou a página de Releases) seja público.
+
+**Publicar uma versão nova:**
+
+1. `npm run version:set -- 0.1.2`: atualiza `package.json`, `tauri.conf.json` e `Cargo.toml`. O número precisa ser maior que o instalado.
+2. `npm run release -- --notes "O que mudou"`: compila, assina e gera, em `<target>/release/hsync-release/v0.1.2/`, o instalador, o `.sig` e o `latest.json`.
+3. Commit e push das mudanças de versão. No GitHub, crie um Release com a tag `v0.1.2` e anexe os três arquivos.
+
+**Chave de assinatura:** a chave privada fica fora do repositório, em `~/.tauri/hsync.key` (ou na variável `TAURI_SIGNING_PRIVATE_KEY`). Faça backup dela: sem ela não dá para assinar atualizações, e quem tem o app instalado precisaria reinstalar à mão uma vez. Para gerar outra (invalida as atualizações dos apps já instalados): `npx tauri signer generate -w ~/.tauri/hsync.key` e troque `pubkey` em `tauri.conf.json`.
+
 ## Segurança: notas e limitações
 
 - **Senha mestre:** usa a criptografia nativa do rclone (NaCl secretbox, XSalsa20-Poly1305), e não AES-256. Assim o `rclone.conf` continua compatível com o rclone de linha de comando. A chave é derivada da senha por SHA-256, sem KDF lenta, então use uma senha longa. Durante a sessão, a senha fica em memória (zerada ao liberar) para que o daemon seja desbloqueado de novo após um reinício.

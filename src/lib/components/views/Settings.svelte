@@ -4,6 +4,7 @@
   import { api, errorMessage } from "../../api/commands";
   import { app } from "../../stores/app.svelte";
   import { toasts } from "../../stores/toasts.svelte";
+  import { updater } from "../../stores/updater.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   let bw = $state(app.settings?.bwlimit ?? "");
@@ -141,13 +142,32 @@
     <div class="flex flex-col gap-2">
       <div class="sec-label">sobre</div>
       <dl class="grid grid-cols-[120px_1fr] gap-y-1 text-[12px]">
+        <dt class="text-muted">hsync</dt>
+        <dd>{updater.current || "—"}</dd>
         <dt class="text-muted">rclone</dt>
         <dd>{version}</dd>
         <dt class="text-muted">RC</dt>
         <dd>127.0.0.1, porta aleatória, credenciais efêmeras</dd>
         <dt class="text-muted">privacidade</dt>
         <dd>sem servidores intermediários</dd>
+        <dt class="text-muted">atualizações</dt>
+        <dd class="flex flex-wrap items-center gap-2">
+          {#if updater.status === "available"}
+            <span class="text-ok">versão {updater.version} disponível</span>
+            <button class="btn btn-primary h-6" onclick={() => updater.install()}>atualizar agora</button>
+          {:else if updater.status === "checking"}
+            <span class="text-muted">verificando…</span>
+          {:else if updater.status === "uptodate"}
+            <span class="text-ok">você está na versão mais recente</span>
+          {:else if updater.status === "error"}
+            <span class="text-err" title={updater.error ?? ""}>não foi possível verificar</span>
+          {/if}
+          <button class="btn h-6" onclick={() => updater.check(true)} disabled={updater.status === "checking"}>verificar agora</button>
+        </dd>
       </dl>
+      {#if updater.status === "error" && updater.error}
+        <p class="selectable text-[11px] text-dim">{updater.error}</p>
+      {/if}
     </div>
   </div>
 </section>

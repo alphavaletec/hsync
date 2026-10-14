@@ -11,6 +11,7 @@
   import Jobs from "./lib/components/views/Jobs.svelte";
   import Settings from "./lib/components/views/Settings.svelte";
   import { app } from "./lib/stores/app.svelte";
+  import { updater } from "./lib/stores/updater.svelte";
   import { VIEWS } from "./lib/views";
 
 
@@ -19,6 +20,7 @@
 
   onMount(() => {
     void app.init();
+    updater.start();
   });
 
   function onkeydown(e: KeyboardEvent) {
@@ -63,6 +65,28 @@
         <span class="text-dim">{app.daemon.state === "ready" ? `:${app.daemon.port}` : ""}</span>
       </span>
     </div>
+
+    {#if updater.banner}
+      <div class="flex shrink-0 items-center gap-3 border-b border-accent/30 bg-accent/10 px-5 py-1.5 text-[12px]">
+        {#if updater.status === "available"}
+          <span class="text-accent">◆</span>
+          <span class="min-w-0 flex-1 truncate">
+            versão <b>{updater.version}</b> disponível{updater.current ? ` (você tem a ${updater.current})` : ""}
+          </span>
+          <button class="btn h-6" onclick={() => updater.dismiss()}>depois</button>
+          <button class="btn btn-primary h-6" onclick={() => updater.install()}>atualizar agora</button>
+        {:else}
+          <span class="text-accent">◆</span>
+          <span class="flex-1">
+            {updater.status === "installing" ? "instalando… o HSync vai reiniciar sozinho" : "baixando a atualização…"}
+            {updater.progress != null ? ` ${updater.progress}%` : ""}
+          </span>
+          {#if updater.progress != null}
+            <div class="progress w-40"><div style:width="{updater.progress}%"></div></div>
+          {/if}
+        {/if}
+      </div>
+    {/if}
 
     {#if app.daemon.state === "restarting"}
       <div class="shrink-0 border-b border-warn/30 bg-warn/10 px-5 py-1.5 text-[12px] text-warn">

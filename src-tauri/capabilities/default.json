@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permissões mínimas da janela principal. Processos e rede ficam exclusivamente no Rust.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
@@ -14,14 +16,23 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
+    "updater:default",
     "opener:allow-reveal-item-in-dir",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://rclone.org/*" },
-        { "url": "https://console.cloud.google.com/*" },
-        { "url": "https://portal.azure.com/*" },
-        { "url": "http://127.0.0.1:53682/*" }
+        {
+          "url": "https://rclone.org/*"
+        },
+        {
+          "url": "https://console.cloud.google.com/*"
+        },
+        {
+          "url": "https://portal.azure.com/*"
+        },
+        {
+          "url": "http://127.0.0.1:53682/*"
+        }
       ]
     }
   ]

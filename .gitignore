@@ -21,3 +21,4 @@ src-tauri/.cargo/config.toml
 # Referências visuais locais
 videoframe_*.png
 .claude/
+release/
