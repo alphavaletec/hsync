@@ -34,6 +34,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "rt-multi-thread"] }
 # Só falamos HTTP em 127.0.0.1 com o rclone: nenhuma pilha TLS é necessária.
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# Miniaturas da aba Arquivos (só os formatos de imagem comuns).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 getrandom = "0.4"
 zeroize = "1"

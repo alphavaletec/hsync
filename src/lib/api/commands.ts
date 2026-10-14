@@ -72,6 +72,9 @@ export const api = {
   previewFile: (remote: string, path: string, size: number, modTime: string | null) =>
     invoke<Preview>("preview_file", { remote, path, size, modTime }),
   openPreviewExternal: (localPath: string) => invoke<void>("open_preview_external", { localPath }),
+  /** Caminho da miniatura (JPEG pequeno) de uma imagem, ou null se o formato/tamanho não é suportado. */
+  thumbnail: (remote: string, path: string, size: number, modTime: string | null) =>
+    invoke<string | null>("thumbnail", { remote, path, size, modTime }),
 
   ondemandStatus: (remote: string) => invoke<OnDemandStatus>("ondemand_status", { remote }),
   enableOndemand: (remote: string) => invoke<OnDemandStatus>("enable_ondemand", { remote }),

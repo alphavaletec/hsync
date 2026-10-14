@@ -11,6 +11,8 @@
     FolderOpen,
     FolderPlus,
     HardDrive,
+    LayoutGrid,
+    List,
     LoaderCircle,
     RefreshCw,
     Upload,
@@ -24,6 +26,7 @@
   import { app } from "../../stores/app.svelte";
   import { toasts } from "../../stores/toasts.svelte";
   import { ITEM_STATE, STATUS_COLOR, STATUS_LABEL, formatBytes, formatDateTime, formatInterval, providerLabel } from "../../utils/format";
+  import FileGrid from "../files/FileGrid.svelte";
   import PreviewModal from "../files/PreviewModal.svelte";
   import ProviderLogo from "../ui/ProviderLogo.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
@@ -42,6 +45,25 @@
   let newFolder = $state<string | null>(null);
   /** Índice em `fileEntries` do arquivo em pré-visualização. */
   let previewIndex = $state<number | null>(null);
+
+  // Lista (colunas) ou miniaturas (grade). A escolha fica guardada neste computador.
+  type ViewMode = "list" | "grid";
+  function readView(): ViewMode {
+    try {
+      return localStorage.getItem("hsync.files.view") === "grid" ? "grid" : "list";
+    } catch {
+      return "list";
+    }
+  }
+  let viewMode = $state<ViewMode>(readView());
+  function setViewMode(v: ViewMode) {
+    viewMode = v;
+    try {
+      localStorage.setItem("hsync.files.view", v);
+    } catch {
+      /* sem armazenamento: vale só nesta sessão */
+    }
+  }
 
   const crumbs = $derived(path ? path.split("/") : []);
   // Caminho fundo: mostra a conta, "…" e as duas últimas pastas, para caber sempre numa linha.
@@ -435,6 +457,20 @@
           {/each}
         </div>
         <button class="btn btn-icon" title="Atualizar" onclick={() => load(remote!, path)}><RefreshCw size={14} /></button>
+        <div class="flex" role="group" aria-label="Modo de visualização">
+          <button
+            class="btn btn-icon {viewMode === 'list' ? 'border-accent text-accent' : ''}"
+            title="Lista"
+            aria-pressed={viewMode === "list"}
+            onclick={() => setViewMode("list")}><List size={14} /></button
+          >
+          <button
+            class="btn btn-icon -ml-px {viewMode === 'grid' ? 'border-accent text-accent' : ''}"
+            title="Miniaturas"
+            aria-pressed={viewMode === "grid"}
+            onclick={() => setViewMode("grid")}><LayoutGrid size={14} /></button
+          >
+        </div>
         <button class="btn" onclick={() => (newFolder = "")}><FolderPlus size={14} /> pasta</button>
         <button class="btn" onclick={() => upload(false)}><Upload size={14} /> enviar arquivos</button>
         <button class="btn btn-icon" title="Enviar pastas" onclick={() => upload(true)}><FolderOpen size={14} /></button>
@@ -465,9 +501,11 @@
           <span class="dots"><i></i><i></i><i></i></span>
           <span class="mx-auto">rclone — operations/list — {entries.length} itens</span>
         </div>
-        <div class="grid shrink-0 grid-cols-[28px_minmax(0,1fr)_90px_110px_96px_170px] items-center gap-x-3 border-b border-line px-3 py-1.5 text-[11px] text-dim">
-          <span></span><span>nome</span><span class="text-right">tamanho</span><span>modificado</span><span>onde</span><span>estado</span>
-        </div>
+        {#if viewMode === "list"}
+          <div class="grid shrink-0 grid-cols-[28px_minmax(0,1fr)_90px_110px_96px_170px] items-center gap-x-3 border-b border-line px-3 py-1.5 text-[11px] text-dim">
+            <span></span><span>nome</span><span class="text-right">tamanho</span><span>modificado</span><span>onde</span><span>estado</span>
+          </div>
+        {/if}
         <div class="min-h-0 flex-1 overflow-auto">
           {#if path}
             <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-muted hover:bg-node" onclick={() => (path = crumbs.slice(0, -1).join("/"))}>
@@ -480,6 +518,19 @@
             <div class="selectable px-4 py-3 text-err">✕ {error}</div>
           {:else if entries.length === 0}
             <div class="px-4 py-3 text-dim">◇ pasta vazia</div>
+          {:else if viewMode === "grid"}
+            <FileGrid
+              remote={remote}
+              {entries}
+              selected={selected}
+              states={STATES}
+              {effective}
+              {busyPath}
+              ontoggle={toggle}
+              onopen={(p) => (path = p)}
+              onpreview={openPreview}
+              onstate={setState}
+            />
           {:else}
             {#each entries as e (e.path)}
               {@const eff = effective(e.path)}

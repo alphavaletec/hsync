@@ -115,7 +115,7 @@ fn safe_file_name(name: &str) -> String {
 }
 
 /// Hash FNV-1a: só para nomear a pasta do cache de forma estável.
-fn cache_key(parts: &[&str]) -> String {
+pub(super) fn cache_key(parts: &[&str]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for p in parts {
         for b in p.bytes().chain(std::iter::once(0)) {

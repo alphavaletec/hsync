@@ -108,6 +108,7 @@ O app instalado consulta `https://github.com/alphavaletec/hsync/releases/latest/
 - **Arquivos ocultos:** o filtro "ignorar ocultos" cobre dotfiles e arquivos de sistema do Windows (`desktop.ini`, `Thumbs.db`, lixeira). O atributo *Hidden* do NTFS não é suportado pelo rclone.
 - **Limite de banda:** é global (`core/bwlimit`). O rclone não aplica limite por tarefa via RC.
 - **Agendamento:** só roda com o HSync aberto (na bandeja). A opção "iniciar com o sistema" abre o app minimizado.
+- **Miniaturas:** a visualização em grade da aba Arquivos gera miniaturas só das imagens visíveis (JPEG, PNG, GIF, WebP e BMP de até 25 MB), em `<app_local_data>/preview/thumbs`, com no máximo 3 por vez. O Explorer do Windows não mostra miniaturas de arquivos ainda não baixados da pasta sob demanda: isso exigiria um provedor de miniaturas registrado no Windows (o OneDrive tem um; o Dropbox não).
 - **Pré-visualização:** o arquivo vai para um cache privado (`<app_local_data>/preview`), que é limpo a cada sessão. É o único diretório exposto ao webview pelo asset protocol. Links dentro de documentos não navegam, e "abrir no aplicativo" é validado no Rust: só arquivos do cache e só tipos de documento ou mídia (nunca executáveis). Formatos antigos (.doc, .ppt) não têm renderizador local.
 
 ## Créditos

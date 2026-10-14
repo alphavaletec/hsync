@@ -130,6 +130,7 @@ pub fn run() {
             commands::files::free_space,
             commands::preview::preview_file,
             commands::preview::open_preview_external,
+            commands::thumbnails::thumbnail,
             commands::jobs::list_jobs,
             commands::jobs::create_job,
             commands::jobs::update_job,
