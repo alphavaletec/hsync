@@ -5,7 +5,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onDestroy } from "svelte";
   import { api, errorMessage } from "../../api/commands";
-  import type { ConfigStep, Provider, RcloneOption, RemoteTest } from "../../api/types";
+  import type { ConfigStep, Provider, ProviderOption, RcloneOption, RemoteTest } from "../../api/types";
   import { app } from "../../stores/app.svelte";
   import { formatBytes, providerLabel } from "../../utils/format";
   import Modal from "../ui/Modal.svelte";
@@ -19,18 +19,24 @@
   const FEATURED = [
     { kind: "drive", name: "gdrive", hint: "login pelo navegador" },
     { kind: "onedrive", name: "onedrive", hint: "login pelo navegador" },
+    { kind: "dropbox", name: "dropbox", hint: "login pelo navegador" },
+    { kind: "box", name: "box", hint: "login pelo navegador" },
+    { kind: "pcloud", name: "pcloud", hint: "login pelo navegador" },
     { kind: "mega", name: "mega", hint: "e-mail e senha" },
   ];
   const HELP_URL: Record<string, string> = {
     drive: "https://rclone.org/drive/#making-your-own-client-id",
     onedrive: "https://rclone.org/onedrive/#getting-your-own-client-id-and-key",
+    dropbox: "https://rclone.org/dropbox/#get-your-own-dropbox-app-id",
   };
   // Campos que o wizard já trata de forma dedicada para os provedores em destaque.
   const DEDICATED: Record<string, string[]> = {
     drive: ["client_id", "client_secret", "scope"],
-    onedrive: ["client_id", "client_secret"],
     mega: ["user", "pass"],
   };
+  // Login pelo navegador (OAuth): os destacados e qualquer provedor do rclone que aceite client_id/client_secret.
+  const FEATURED_OAUTH = new Set(["drive", "onedrive", "dropbox", "box", "pcloud"]);
+  const OAUTH_KEYS = ["client_id", "client_secret"];
 
   // svelte-ignore state_referenced_locally
   let phase = $state<Phase>(reauth ? "starting" : "provider");
@@ -51,9 +57,17 @@
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
   const provider = $derived(providers.find((p) => p.name === kind));
-  const genericOptions = $derived(
-    (provider?.options ?? []).filter((o) => !(DEDICATED[kind] ?? []).includes(o.name)),
+  const browserLogin = $derived(
+    FEATURED_OAUTH.has(kind) || OAUTH_KEYS.every((k) => provider?.options.some((o) => o.name === k)),
   );
+  const genericOptions = $derived(
+    (provider?.options ?? []).filter(
+      (o) => !(DEDICATED[kind] ?? []).includes(o.name) && !(browserLogin && OAUTH_KEYS.includes(o.name)),
+    ),
+  );
+  // No login pelo navegador, o que sobra além das chaves é opcional e fica no "avançado".
+  const requiredOptions = $derived(genericOptions.filter((o) => !browserLogin || o.required));
+  const advancedOptions = $derived(browserLogin ? genericOptions.filter((o) => !o.required) : []);
   const requiredMissing = $derived(
     kind === "mega"
       ? !params.user || !params.pass
@@ -174,10 +188,36 @@
   }
 </script>
 
+{#snippet optionFields(options: ProviderOption[])}
+  {#each options as o (o.name)}
+    <div>
+      <label class="field-label" for="opt-{o.name}">{o.name}{o.required ? " *" : ""}</label>
+      {#if o.examples.length && o.kind !== "bool"}
+        <select id="opt-{o.name}" class="input" bind:value={params[o.name]}>
+          <option value="">{o.default ? `padrão (${o.default})` : "—"}</option>
+          {#each o.examples as ex (ex.value)}
+            <option value={ex.value}>{ex.help || ex.value}</option>
+          {/each}
+        </select>
+      {:else}
+        <input
+          id="opt-{o.name}"
+          class="input"
+          type={o.isPassword ? "password" : "text"}
+          bind:value={params[o.name]}
+          placeholder={o.default}
+          autocomplete="off"
+        />
+      {/if}
+      <p class="mt-1 line-clamp-2 text-[11px] text-dim" title={o.help}>{o.help}</p>
+    </div>
+  {/each}
+{/snippet}
+
 <Modal title={reauth ? `reautorizar — ${reauth.name}:` : "conectar conta"} width="640px" onclose={cancel}>
   {#if phase === "provider"}
     <div class="sec-label mb-3">provedor</div>
-    <div class="grid grid-cols-3 gap-4 px-2">
+    <div class="grid grid-cols-2 gap-4 px-2 sm:grid-cols-3">
       {#each FEATURED as f (f.kind)}
         <button class="node px-4 py-4 text-left hover:border-accent" onclick={() => choose(f.kind, f.name)}>
           <span class="node-dot"></span>
@@ -207,17 +247,17 @@
         <input id="remote-name" class="input" bind:value={name} maxlength="64" />
       </div>
 
-      {#if kind === "drive" || kind === "onedrive"}
+      {#if browserLogin}
         <div class="term flex items-start gap-3 px-4 py-3 text-[12.5px]">
           <ExternalLink size={16} class="mt-0.5 shrink-0 text-accent" />
           <span>
-            Ao clicar em <span class="text-accent">conectar</span>, o navegador abre na página de login
-            {kind === "drive" ? "do Google" : "da Microsoft"}. Entre na sua conta e autorize — o HSync recebe o acesso
-            direto neste PC. Não é preciso criar chaves.
+            Ao clicar em <span class="text-accent">conectar</span>, o navegador abre na página de login de
+            {providerLabel(kind)}. Entre na sua conta e autorize — o HSync recebe o acesso direto neste PC. Não é
+            preciso criar chaves nem informar client_id.
           </span>
         </div>
         <button class="self-start text-[11.5px] text-muted hover:text-fg" onclick={() => (showKeys = !showKeys)}>
-          {showKeys ? "▾" : "▸"} avançado: usar meu próprio client_id
+          {showKeys ? "▾" : "▸"} avançado: chaves próprias (client_id / client_secret){advancedOptions.length ? " e mais opções" : ""}
         </button>
         {#if showKeys}
           {#if kind === "drive"}
@@ -239,9 +279,13 @@
               <input id="csec" class="input" type="password" bind:value={params.client_secret} autocomplete="off" />
             </div>
           </div>
-          <button class="flex items-center gap-1 self-start text-[11.5px] text-accent hover:underline" onclick={() => openUrl(HELP_URL[kind])}>
-            <ExternalLink size={12} /> como criar meu client_id
+          <button
+            class="flex items-center gap-1 self-start text-[11.5px] text-accent hover:underline"
+            onclick={() => openUrl(HELP_URL[kind] ?? `https://rclone.org/${kind}/`)}
+          >
+            <ExternalLink size={12} /> como criar minhas chaves
           </button>
+          {@render optionFields(advancedOptions)}
         {/if}
         {#if kind === "drive"}
           <div>
@@ -267,29 +311,7 @@
       {/if}
 
       {#if !DEDICATED[kind]}
-        {#each genericOptions as o (o.name)}
-          <div>
-            <label class="field-label" for="opt-{o.name}">{o.name}{o.required ? " *" : ""}</label>
-            {#if o.examples.length && o.kind !== "bool"}
-              <select id="opt-{o.name}" class="input" bind:value={params[o.name]}>
-                <option value="">{o.default ? `padrão (${o.default})` : "—"}</option>
-                {#each o.examples as ex (ex.value)}
-                  <option value={ex.value}>{ex.help || ex.value}</option>
-                {/each}
-              </select>
-            {:else}
-              <input
-                id="opt-{o.name}"
-                class="input"
-                type={o.isPassword ? "password" : "text"}
-                bind:value={params[o.name]}
-                placeholder={o.default}
-                autocomplete="off"
-              />
-            {/if}
-            <p class="mt-1 line-clamp-2 text-[11px] text-dim" title={o.help}>{o.help}</p>
-          </div>
-        {/each}
+        {@render optionFields(requiredOptions)}
       {/if}
 
       {#if error}<p class="selectable text-[12px] text-err">✕ {error}</p>{/if}
