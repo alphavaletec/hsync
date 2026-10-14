@@ -81,6 +81,8 @@ npm run bundle                 # instalador NSIS em <target-dir>/release/bundle/
 
 `npm run bundle` executa `tauri build` compilando o frontend numa pasta temporária, porque dentro do Dropbox o `dist/` fica travado. O resultado é o mesmo do `npm run tauri build`. O instalador fica em torno de 22 MB: app com cerca de 6 MB mais o rclone, comprimido.
 
+Dois cuidados que, se esquecidos, geram um instalador quebrado (já aconteceu nas versões 0.1.0 e 0.1.1): o `Cargo.toml` precisa manter a feature `custom-protocol` (é ela que embute a interface no executável) e o `frontendDist` do build precisa ser um caminho relativo — um caminho absoluto do Windows (`C:...`) é lido como URL e o app abre uma listagem de arquivos. O `scripts/bundle.mjs` já cuida do segundo. Depois de gerar o instalador, abra o `hsync.exe` compilado e confira que a interface aparece.
+
 `tauri.conf.json` declara `bundle.externalBin: ["binaries/rclone"]`. O Tauri procura `rclone-x86_64-pc-windows-msvc.exe` e o instala ao lado do `HSync.exe` como `rclone.exe`. Para ARM64, use `scripts/fetch-rclone.ps1 -Target aarch64-pc-windows-msvc` e `npm run tauri build -- --target aarch64-pc-windows-msvc`.
 
 Para distribuição, assine o `HSync.exe` e o instalador. O SmartScreen e alguns antivírus sinalizam binários não assinados. No macOS, o sidecar precisa ser assinado e notarizado junto com o app.
