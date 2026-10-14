@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "Gerenciador visual de sincronização e backup em nuvem baseado no Rclone"
 authors = ["Alpha Vale Tecnologias"]
 edition = "2021"
+license = "MIT"
 rust-version = "1.80"
 
 [lib]

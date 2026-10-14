@@ -114,3 +114,9 @@ O app instalado consulta `https://github.com/alphavaletec/hsync/releases/latest/
   respectivos donos e são usadas só para identificar o serviço de cada conta. O OneDrive aparece como uma nuvem no azul
   da marca, já que a Microsoft não permite a distribuição do logo pelo Simple Icons.
 - Ícones da interface: [Lucide](https://lucide.dev) (ISC).
+- [rclone](https://rclone.org) (MIT), que o HSync inclui e executa como programa separado: todo o trabalho de sincronização é dele.
+- [cloud-filter](https://crates.io/crates/cloud-filter) (MIT), com correções em `src-tauri/vendor/cloud-filter`.
+
+## Licença
+
+[MIT](LICENSE): uso, cópia, modificação e distribuição livres, sem garantia. Gratuito e sem fins lucrativos.
