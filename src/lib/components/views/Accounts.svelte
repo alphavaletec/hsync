@@ -110,7 +110,7 @@
     </div>
   {/if}
 
-  <div class="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-6">
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-4 sm:gap-6">
     {#each app.remotes as r (r.name)}
       {@const t = tests[r.name]}
       <div
@@ -122,14 +122,14 @@
         onkeydown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openFiles(r, e))}
       >
         <span class="node-dot"></span>
-        <div class="flex items-center gap-3">
+        <div class="flex min-w-0 items-center gap-3">
           <ProviderLogo kind={r.kind} size={22} />
-          <div class="min-w-0">
-            <div class="truncate text-[14px] font-semibold">{r.name}:</div>
-            <div class="text-[11px] text-muted">{providerLabel(r.kind)}</div>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-[14px] font-semibold" title="{r.name}:">{r.name}:</div>
+            <div class="truncate text-[11px] text-muted">{providerLabel(r.kind)}</div>
           </div>
           {#if t && t !== "loading"}
-            <span class="ml-auto {t.ok ? 'text-ok' : 'text-err'}">{t.ok ? "◆" : "✕"}</span>
+            <span class="shrink-0 {t.ok ? 'text-ok' : 'text-err'}">{t.ok ? "◆" : "✕"}</span>
           {/if}
         </div>
 
@@ -156,7 +156,7 @@
           {/if}
         {/if}
 
-        <div class="mt-4 flex gap-2">
+        <div class="mt-4 flex flex-wrap gap-2">
           <button class="btn" onclick={() => testRemote(r)} disabled={t === "loading"}><Activity size={13} /> testar</button>
           {#if OAUTH_KINDS.has(r.kind)}
             <button

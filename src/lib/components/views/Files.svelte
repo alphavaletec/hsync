@@ -44,6 +44,10 @@
   let previewIndex = $state<number | null>(null);
 
   const crumbs = $derived(path ? path.split("/") : []);
+  // Caminho fundo: mostra a conta, "…" e as duas últimas pastas, para caber sempre numa linha.
+  const KEEP_CRUMBS = 2;
+  const hiddenCrumbs = $derived(Math.max(0, crumbs.length - KEEP_CRUMBS - 1));
+  const shownCrumbs = $derived(crumbs.map((name, i) => ({ name, i })).slice(hiddenCrumbs ? crumbs.length - KEEP_CRUMBS : 0));
   const selectedEntries = $derived(entries.filter((e) => selected.has(e.path)));
   const fileEntries = $derived(entries.filter((e) => !e.isDir));
   /** Alguma tarefa desta conta está rodando agora? (itens marcados aparecem como "baixando"). */
@@ -410,11 +414,24 @@
   <section class="flex min-h-0 min-w-0 flex-col gap-3 px-5 py-4">
     {#if remote}
       <div class="flex flex-wrap items-center gap-2">
-        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-[12.5px]">
-          <button class="text-accent hover:underline" onclick={() => (path = "")}>{remote}:</button>
-          {#each crumbs as c, i (i)}
-            <span class="text-dim">/</span>
-            <button class="hover:underline" onclick={() => (path = crumbs.slice(0, i + 1).join("/"))}>{c}</button>
+        <!-- Uma linha só: nomes longos viram "…" (o nome completo fica no tooltip); os botões é que quebram de linha. -->
+        <div class="flex min-w-0 basis-full items-center gap-1 overflow-hidden text-[12.5px] whitespace-nowrap">
+          <button class="max-w-[30%] min-w-[4rem] shrink truncate text-accent hover:underline" title="{remote}:" onclick={() => (path = "")}>{remote}:</button>
+          {#if hiddenCrumbs}
+            <span class="shrink-0 text-dim">/</span>
+            <button
+              class="shrink-0 px-1 text-muted hover:underline"
+              title={crumbs.slice(0, hiddenCrumbs).join(" / ")}
+              onclick={() => (path = crumbs.slice(0, hiddenCrumbs).join("/"))}>…</button
+            >
+          {/if}
+          {#each shownCrumbs as { name, i } (i)}
+            <span class="shrink-0 text-dim">/</span>
+            <button
+              class="min-w-[4rem] truncate hover:underline {i === crumbs.length - 1 ? 'font-semibold' : ''}"
+              title={name}
+              onclick={() => (path = crumbs.slice(0, i + 1).join("/"))}>{name}</button
+            >
           {/each}
         </div>
         <button class="btn btn-icon" title="Atualizar" onclick={() => load(remote!, path)}><RefreshCw size={14} /></button>

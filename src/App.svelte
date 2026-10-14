@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Gate from "./lib/components/Gate.svelte";
+  import SpeedMeter from "./lib/components/dashboard/SpeedMeter.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
   import HMark from "./lib/components/ui/HMark.svelte";
   import Toasts from "./lib/components/ui/Toasts.svelte";
@@ -57,7 +58,10 @@
       <span class="mx-auto text-muted">
         {#if app.daemon.state === "ready"}rclone {app.daemon.version} · rcd 127.0.0.1{:else}rclone rcd{/if}
       </span>
-      <span class="text-dim">{app.daemon.state === "ready" ? `:${app.daemon.port}` : ""}</span>
+      <span class="flex items-center gap-4">
+        <SpeedMeter />
+        <span class="text-dim">{app.daemon.state === "ready" ? `:${app.daemon.port}` : ""}</span>
+      </span>
     </div>
 
     {#if app.daemon.state === "restarting"}

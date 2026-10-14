@@ -4,9 +4,9 @@
   import { app } from "../../stores/app.svelte";
   import { formatBytes, formatRelative, formatSpeed } from "../../utils/format";
   import LogPanel from "../dashboard/LogPanel.svelte";
-  import Sparkline from "../dashboard/Sparkline.svelte";
   import TopologyMap from "../dashboard/TopologyMap.svelte";
   import TransferDashboard from "../dashboard/TransferDashboard.svelte";
+  import Collapsible from "../ui/Collapsible.svelte";
   import ViewHeader from "../ui/ViewHeader.svelte";
 
   let now = $state(Date.now());
@@ -91,31 +91,35 @@
   <TopologyMap />
 </section>
 
-<div class="grid min-h-0 grid-cols-[minmax(0,1fr)_300px] border-t border-line-soft">
-  <section class="flex min-w-0 flex-col gap-3 px-5 py-4">
-    <div class="sec-label">transferências</div>
+<Collapsible id="transferencias" title="transferências">
+  {#snippet summary()}
+    {active.length > 0 ? `${active.length} em execução · ` : ""}hoje: {today.runs}
+    {today.runs === 1 ? "execução" : "execuções"}, {formatBytes(today.bytes)}, {today.files} arq.{today.errors
+      ? ` · ${today.errors} ${today.errors === 1 ? "falha" : "falhas"}`
+      : ""}
+  {/snippet}
+  <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_240px] gap-6">
     <TransferDashboard />
-  </section>
+    <aside class="flex flex-col gap-3 border-l border-line-soft pl-5">
+      <div class="sec-label">hoje</div>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px]">
+        <dt class="text-muted">execuções</dt>
+        <dd class="text-right">{today.runs} <span class="text-ok">({today.ok} ok)</span></dd>
+        <dt class="text-muted">transferido</dt>
+        <dd class="text-right">{formatBytes(today.bytes)}</dd>
+        <dt class="text-muted">arquivos</dt>
+        <dd class="text-right">{today.files}</dd>
+        <dt class="text-muted">falhas</dt>
+        <dd class="text-right {today.errors ? 'text-err' : ''}">{today.errors}</dd>
+      </dl>
+    </aside>
+  </div>
+</Collapsible>
 
-  <aside class="flex flex-col gap-3 border-l border-line-soft px-5 py-4">
-    <div class="sec-label">velocidade</div>
-    <Sparkline samples={app.speedHistory} />
-
-    <div class="sec-label mt-3">hoje</div>
-    <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px]">
-      <dt class="text-muted">execuções</dt>
-      <dd class="text-right">{today.runs} <span class="text-ok">({today.ok} ok)</span></dd>
-      <dt class="text-muted">transferido</dt>
-      <dd class="text-right">{formatBytes(today.bytes)}</dd>
-      <dt class="text-muted">arquivos</dt>
-      <dd class="text-right">{today.files}</dd>
-      <dt class="text-muted">falhas</dt>
-      <dd class="text-right {today.errors ? 'text-err' : ''}">{today.errors}</dd>
-    </dl>
-  </aside>
-</div>
-
-<section class="border-t border-line-soft px-5 py-4">
-  <div class="sec-label mb-3">log</div>
+<Collapsible id="log" title="log">
+  {#snippet summary()}
+    {@const last = app.logs.at(-1)}
+    {last ? last.msg : "sem mensagens"}
+  {/snippet}
   <LogPanel />
-</section>
+</Collapsible>
