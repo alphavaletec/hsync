@@ -93,6 +93,8 @@ pub struct JobManager {
     store: Arc<Store>,
     bisync_root: PathBuf,
     active: Mutex<HashMap<i64, ActiveRun>>,
+    /// Nomes das tarefas cuja última execução falhou (ícone de erro da bandeja).
+    failed_jobs: Mutex<Vec<String>>,
     paused: AtomicBool,
     /// Ids negativos para transferências avulsas (não persistidas como tarefa).
     next_adhoc: AtomicI64,
@@ -131,6 +133,7 @@ impl JobManager {
             store,
             bisync_root,
             active: Mutex::new(HashMap::new()),
+            failed_jobs: Mutex::new(Vec::new()),
             paused: AtomicBool::new(paused),
             next_adhoc: AtomicI64::new(-1),
             watch: Mutex::new(WatchState::default()),
@@ -140,6 +143,7 @@ impl JobManager {
     }
 
     pub fn start_background(self: &Arc<Self>) {
+        self.refresh_failed_jobs();
         let me = self.clone();
         tauri::async_runtime::spawn(async move { me.monitor_loop().await });
         let me = self.clone();
@@ -590,7 +594,49 @@ impl JobManager {
         self.emit_jobs_changed();
     }
 
+    /// Recalcula quais tarefas terminaram a última execução com falha (alimenta o ícone de erro da bandeja).
+    fn refresh_failed_jobs(&self) {
+        let failed: Vec<String> = self
+            .store
+            .list_jobs()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|j| j.last_run.as_ref().is_some_and(|r| r.status == RunStatus::Failed))
+            .map(|j| j.name)
+            .collect();
+        *self.failed_jobs.lock().unwrap() = failed;
+    }
+
+    /// Ícone e dica da bandeja: sincronizando > erro > sincronizado.
+    fn update_tray(&self, running: usize, percent: Option<u64>) {
+        use crate::rclone::daemon::DaemonStatus;
+        use crate::tray::TrayStatus;
+        let failed = self.failed_jobs.lock().unwrap().clone();
+        let daemon_problem = match self.daemon.status() {
+            DaemonStatus::Failed { .. } => Some("o rclone parou"),
+            DaemonStatus::Locked => Some("aguardando a senha mestre"),
+            _ => None,
+        };
+        let status = if running > 0 {
+            TrayStatus::Syncing
+        } else if !failed.is_empty() || daemon_problem.is_some() {
+            TrayStatus::Error
+        } else {
+            TrayStatus::Synced
+        };
+        if status != TrayStatus::Syncing {
+            let text = match (status, daemon_problem) {
+                (TrayStatus::Error, Some(p)) => format!("HSync — erro: {p}"),
+                (TrayStatus::Error, None) => format!("HSync — erro em: {}", failed.join(", ")),
+                _ => "HSync — tudo sincronizado".to_string(),
+            };
+            crate::tray::set_tooltip(&self.app, &text);
+        }
+        crate::tray::set_status(&self.app, status, percent);
+    }
+
     pub fn emit_jobs_changed(&self) {
+        self.refresh_failed_jobs();
         self.refresh_watches();
         let _ = self.app.emit("jobs-changed", ());
     }
@@ -661,10 +707,15 @@ impl JobManager {
 
             let progress = self.progress_snapshot();
             let speed: f64 = progress.iter().map(|p| p.speed).sum();
-            crate::tray::set_tooltip(
-                &self.app,
-                &format!("HSync — {} em execução · {}/s", progress.len(), format_bytes(speed as u64)),
-            );
+            if !progress.is_empty() {
+                crate::tray::set_tooltip(
+                    &self.app,
+                    &format!("HSync — sincronizando: {} em execução · {}/s", progress.len(), format_bytes(speed as u64)),
+                );
+            }
+            let total: u64 = progress.iter().map(|p| p.total_bytes).sum();
+            let done: u64 = progress.iter().map(|p| p.bytes).sum();
+            self.update_tray(progress.len(), (total > 0).then(|| done * 100 / total));
             let _ = self.app.emit("job-progress", progress);
         }
     }
